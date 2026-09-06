@@ -1,0 +1,45 @@
+# ===== Android / Gradle 构建产物 =====
+.gradle/
+**/build/
+build/
+app/build/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# ===== 签名密钥（不要提交任何 keystore）=====
+*.keystore
+*.jks
+*.pfx
+
+# ===== 机器/环境特定配置 =====
+# local.properties 含 SDK 绝对路径，每台机器不同
+local.properties
+*.iml
+.idea/
+
+# ===== 编译产物（APK 可按情况保留，但调试阶段不保留）=====
+*.apk
+*.aab
+*.dex
+*.class
+
+# ===== 顶层临时校验/日志文件（项目特定噪声，不进库）=====
+_checksum*.txt
+apk_check.txt
+build_final_check.log
+_test_*.png
+_*.png
+*.log
+
+# ===== WorkBuddy AI 工作区 =====
+# 记忆/截图/验证脚本/调试中间产物均为本地 AI 工作区，
+# 与项目源码解耦，不入库（持久化由 .workbuddy/memory/ 的本地存储负责）
+.workbuddy/
+
+# ===== OS / 编辑器垃圾 =====
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~

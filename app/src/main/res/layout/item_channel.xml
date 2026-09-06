@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/channel_card_normal"
+    android:layout_margin="6dp"
+    android:focusable="true"
+    android:clickable="true"
+    android:minHeight="160dp"
+    android:gravity="center">
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="100dp"
+        android:layout_marginStart="8dp"
+        android:layout_marginEnd="8dp"
+        android:layout_marginTop="8dp"
+        android:background="#000000">
+
+        <!-- 真 TextureView：libVLC RTSP 抓帧渲染到这里（与多画面同路径，已验证 vout 正常出图）。
+             ★ 关键约束：TextureView 不能设 android:background（设了直接 InflateException 崩
+             —— TextureView 必须保持透明，alpha 通道传给 SurfaceFlinger，背景会破坏合成）。
+             黑底视觉由外层 FrameLayout background="#000000" 提供。
+             ★ IV 必须 visibility="gone"：未 gone 时 IV 完全覆盖 TV 像素，SurfaceFlinger 仍把
+             TV 视为 abandoned（与"offscreen 池"死路同源）。gone 后 TV 直接露出 → SurfaceFlinger
+             视为合成中 → 不 abandon。 -->
+        <TextureView
+            android:id="@+id/tv_thumbnail"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <!-- 占位图：HTTP ISAPI 抓到图时直接显示；RTSP 抓帧拿图后也会覆盖到这里。
+             ★ 必须 visibility="gone"（不能 gone 之外的"覆盖但不可见"）：gone 的 View
+             不参与绘制/合成，TV 直接露出 → SurfaceFlinger 视为合成中 → 不 abandon。
+             setImageBitmap()/setImageResource() 仍生效（只是不显示）——保留它是因为
+             ChannelAdapter 里 onSuccess 回填 placeholder/bmp 流程不动，避免大改。 -->
+        <ImageView
+            android:id="@+id/iv_thumbnail"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="centerCrop"
+            android:visibility="gone"
+            android:contentDescription="通道预览" />
+
+        <TextView
+            android:id="@+id/tv_channel_name"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom"
+            android:textColor="#FFFFFF"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:background="#80000000"
+            android:paddingStart="8dp"
+            android:paddingTop="4dp"
+            android:paddingEnd="8dp"
+            android:paddingBottom="4dp"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:layout_marginTop="6dp"
+            android:layout_marginBottom="8dp" />
+    </FrameLayout>
+
+</LinearLayout>

@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 布局选择浮窗：单击多画面格子后弹出，选 4宫格/9宫格/16宫格。
+     样式与主界面统一：bg_card #132F4C 背景 + deep_blue_primary #0D47A1 按钮 + 白色文字 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:padding="8dp"
+    android:background="@drawable/popup_background"
+    android:gravity="center_vertical">
+
+    <Button
+        android:id="@+id/btn_layout_4"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:layout_margin="4dp"
+        android:background="@drawable/popup_button_bg"
+        android:text="@string/layout_4"
+        android:textColor="@android:color/white"
+        android:textSize="15sp"
+        android:textStyle="bold"
+        android:padding="14dp"
+        android:gravity="center"
+        android:textAllCaps="false" />
+
+    <Button
+        android:id="@+id/btn_layout_9"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:layout_margin="4dp"
+        android:background="@drawable/popup_button_bg"
+        android:text="@string/layout_9"
+        android:textColor="@android:color/white"
+        android:textSize="15sp"
+        android:textStyle="bold"
+        android:padding="14dp"
+        android:gravity="center"
+        android:textAllCaps="false" />
+
+    <Button
+        android:id="@+id/btn_layout_16"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:layout_margin="4dp"
+        android:background="@drawable/popup_button_bg"
+        android:text="@string/layout_16"
+        android:textColor="@android:color/white"
+        android:textSize="15sp"
+        android:textStyle="bold"
+        android:padding="14dp"
+        android:gravity="center"
+        android:textAllCaps="false" />
+
+</LinearLayout>

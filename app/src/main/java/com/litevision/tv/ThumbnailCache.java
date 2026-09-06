@@ -1,0 +1,218 @@
+package com.litevision.tv;
+
+import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.os.Handler;
+import android.os.HandlerThread;
+import android.os.Looper;
+import android.util.Log;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+
+/**
+ * 缩略图本地缓存（"真实播放帧做缩略图"方案）。
+ *
+ * <p>设计：</p>
+ * <ul>
+ *   <li>存储位置：App 私有目录 {@code getFilesDir()/thumbnails/chXX.jpg}（卸载时清除，无外部权限）</li>
+ *   <li>写盘：后台 IO 线程（{@link #ioHandler}），不阻塞 UI / libVLC 事件线程</li>
+ *   <li>读图：后台线程 decode 成 Bitmap 后 post 回主线程给 ImageView 设图</li>
+ *   <li>截帧来源：{@link ThumbnailCapture}（PixelCopy）— libVLC 3.5.1 Java API 无 takeSnapshot</li>
+ * </ul>
+ *
+ * <p>何时更新：</p>
+ * <ul>
+ *   <li>PlayerActivity / MultiViewActivity 收到 Playing 后 2.5s（让画面稳定）触发截图</li>
+ *   <li>每条流只截一次（Activity 生命周期内），避免反复写盘</li>
+ * </ul>
+ */
+public final class ThumbnailCache {
+
+    private static final String TAG = "ThumbnailCache";
+    private static final String DIR_NAME = "thumbnails";
+    private static final int THUMB_WIDTH = 480;   // 列表卡片宽度的 1.5x，留点富余
+    private static final int THUMB_HEIGHT = 270;  // 16:9
+    private static final int JPEG_QUALITY = 80;
+
+    /** 后台 IO 线程：写盘 / 读图解码（独立线程，避免压 libVLC 事件 / 主线程） */
+    private static HandlerThread ioThread;
+    private static Handler ioHandler;
+    private static Handler mainHandler;
+
+    private static synchronized void ensureIo(Context ctx) {
+        if (ioThread == null) {
+            ioThread = new HandlerThread("thumbnail-cache-io");
+            ioThread.start();
+            ioHandler = new Handler(ioThread.getLooper());
+            mainHandler = new Handler(Looper.getMainLooper());
+        }
+    }
+
+    private ThumbnailCache() {}
+
+    /** 缩略图缓存目录（不存在则创建）。 */
+    public static File getDir(Context ctx) {
+        ensureIo(ctx);
+        File dir = new File(ctx.getFilesDir(), DIR_NAME);
+        if (!dir.exists()) {
+            //noinspection ResultOfMethodCallIgnored
+            dir.mkdirs();
+        }
+        return dir;
+    }
+
+    /** 单通道缓存文件。{@code channelIndex} 是 0-based（与 ThumbnailLoader / ConfigManager 一致）。 */
+    public static File getFile(Context ctx, int channelIndex) {
+        return new File(getDir(ctx), "ch" + channelIndex + ".jpg");
+    }
+
+    /** 是否已有该通道的本地缓存文件。 */
+    public static boolean hasCached(Context ctx, int channelIndex) {
+        File f = getFile(ctx, channelIndex);
+        return f.exists() && f.length() > 0;
+    }
+
+    /**
+     * 异步写盘：把传入的 Bitmap（来自 PixelCopy）压缩为 JPEG 写到 {@link #getFile}。
+     *
+     * @param ctx          用于解析 App 私有目录
+     * @param channelIndex 0-based 通道索引
+     * @param bitmap       来自 PixelCopy 的 Bitmap（必须 mutable 且 ARGB_8888）
+     * @param onDone       写盘完成回调（主线程；success=true=写入成功，false=失败）。可 null。
+     */
+    public static void save(final Context ctx, final int channelIndex, final Bitmap bitmap,
+                            final SaveCallback onDone) {
+        ensureIo(ctx);
+        if (bitmap == null || bitmap.isRecycled()) {
+            if (onDone != null) mainHandler.post(() -> onDone.onResult(false));
+            return;
+        }
+        ioHandler.post(() -> {
+            boolean ok = false;
+            File out = getFile(ctx, channelIndex);
+            try (FileOutputStream fos = new FileOutputStream(out)) {
+                // 缩放到目标尺寸再压缩，省空间 + 加载更快
+                Bitmap scaled = scaleToTarget(bitmap, THUMB_WIDTH, THUMB_HEIGHT);
+                ok = scaled.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, fos);
+                if (scaled != bitmap) {
+                    scaled.recycle();
+                }
+                Log.i(TAG, "saved ch" + channelIndex + " ok=" + ok
+                        + " size=" + (ok ? out.length() : -1) + " bytes");
+            } catch (IOException e) {
+                Log.w(TAG, "save ch" + channelIndex + " failed: " + e.getMessage());
+                ok = false;
+            } finally {
+                final boolean finalOk = ok;
+                if (onDone != null) {
+                    mainHandler.post(() -> onDone.onResult(finalOk));
+                }
+            }
+        });
+    }
+
+    /**
+     * 异步读盘：读取 {@code chXX.jpg} 并在主线程把 Bitmap 设到传入的 ImageView。
+     *
+     * <p>复用 tag 反查防 RV 错位（传入的 iv 应已设过 tag = 缓存 key）。</p>
+     *
+     * @param ctx          用于解析 App 私有目录
+     * @param channelIndex 0-based 通道索引
+     * @param targetIv     列表页的 ImageView（必须有与 key 对应的 tag）
+     * @param key          期望 tag（与 targetIv.setTag(key) 的值一致，校验防 RV 复用错位）
+     */
+    public static void loadInto(final Context ctx, final int channelIndex,
+                                 final android.widget.ImageView targetIv, final String key) {
+        ensureIo(ctx);
+        final File f = getFile(ctx, channelIndex);
+        if (!f.exists() || f.length() == 0 || targetIv == null) {
+            return;
+        }
+        ioHandler.post(() -> {
+            Bitmap bm = null;
+            try {
+                // inSampleSize=1 即可（THUMB_WIDTH/HEIGHT 本来就不大，无需再缩）
+                BitmapFactory.Options opts = new BitmapFactory.Options();
+                opts.inPreferredConfig = Bitmap.Config.ARGB_8888;
+                bm = BitmapFactory.decodeFile(f.getAbsolutePath(), opts);
+            } catch (Throwable t) {
+                Log.w(TAG, "load ch" + channelIndex + " failed: " + t.getMessage());
+            }
+            final Bitmap finalBm = bm;
+            mainHandler.post(() -> {
+                if (finalBm == null || targetIv.getTag() == null
+                        || !key.equals(targetIv.getTag().toString())) {
+                    // 格子已 RV 复用 / 已置空 tag → 丢弃，自己回收避免泄漏
+                    if (finalBm != null) finalBm.recycle();
+                    return;
+                }
+                targetIv.setImageBitmap(finalBm);
+            });
+        });
+    }
+
+    /** 等比例缩放到不超过 maxW × maxH 的范围（保持纵横比）。 */
+    private static Bitmap scaleToTarget(Bitmap src, int maxW, int maxH) {
+        if (src.getWidth() <= maxW && src.getHeight() <= maxH) {
+            return src;
+        }
+        float ratio = Math.min(
+                maxW / (float) src.getWidth(),
+                maxH / (float) src.getHeight());
+        int nw = Math.max(1, Math.round(src.getWidth() * ratio));
+        int nh = Math.max(1, Math.round(src.getHeight() * ratio));
+        return Bitmap.createScaledBitmap(src, nw, nh, true);
+    }
+
+    /** 写盘完成回调（在主线程派发）。 */
+    public interface SaveCallback {
+        void onResult(boolean success);
+    }
+
+    /**
+     * 删除所有缓存（用于设置页"清除缩略图缓存"或调试）。同步删除。
+     */
+    public static int clearAll(Context ctx) {
+        File dir = getDir(ctx);
+        File[] files = dir.listFiles();
+        if (files == null) return 0;
+        int n = 0;
+        for (File f : files) {
+            if (f.delete()) n++;
+        }
+        Log.i(TAG, "clearAll removed " + n + " cached thumbnails");
+        return n;
+    }
+
+    /** 调试用：当前缓存数量。 */
+    public static int count(Context ctx) {
+        File dir = getDir(ctx);
+        String[] names = dir.list();
+        return names == null ? 0 : names.length;
+    }
+
+    /** 诊断日志（Activity onResume 时打印一行）。 */
+    public static void logStats(Context ctx) {
+        int n = count(ctx);
+        long bytes = 0;
+        File dir = getDir(ctx);
+        File[] fs = dir.listFiles();
+        if (fs != null) {
+            for (File f : fs) bytes += f.length();
+        }
+        Log.i(TAG, "缓存统计: " + n + " 张, " + (bytes / 1024) + " KB");
+    }
+
+    /** 防止泄漏：App 退出时调用一次。 */
+    public static synchronized void shutdown() {
+        if (ioThread != null) {
+            ioThread.quitSafely();
+            ioThread = null;
+            ioHandler = null;
+            mainHandler = null;
+        }
+    }
+}

@@ -1,0 +1,43 @@
+sequenceDiagram
+    participant Boot as Android Launcher
+    participant Main as MainActivity
+    participant Config as ConfigManager
+    participant Multi as MultiViewActivity
+    participant Player as PlayerActivity
+
+    Note over Boot,Main: 冷/热启动恢复
+    Boot->>Main: onCreate/onResume(首次)
+    Main->>Config: getLastViewMode()
+    alt last_view_mode == "single"
+        Main->>Player: startActivity(channel_index=lastChannelIndex, stream=lastStreamType)
+    else last_view_mode == "multi"
+        Main->>Multi: startActivity(layout=lastMultiLayout)
+    else 无记忆
+        Main->>Main: 显示列表页(维持现状)
+    end
+
+    Note over Main,Player: 正常从列表进入
+    Main->>Player: onChannelClick(ch) startActivity
+    Player->>Player: onCreate 读 EXTRA → playChannel(ch, sub)
+
+    Note over Multi,Player: 多画面运行
+    User->>Multi: 进入多画面(D-pad/按钮)
+    Multi->>Config: getLastMultiLayout()/isMultiUseSub()
+    Multi->>Multi: 创建 N=layout slots + engines (只建不播)
+    loop 每格可见时
+        Multi->>Engine: play(url, sub=multi_use_sub)
+        Engine->>V: media.play()
+        V-->>Engine: Playing 事件
+        Engine-->>Tile: onPlayingChanged
+    end
+    User->>Multi: OK / 单击当前格
+    Multi->>Config: setLastChannelIndex(ch); setLastStreamType(sub/main)
+    Multi->>Player: startActivity(ch, from_multi=true, stream=...)
+    Player-->>Multi: BACK 返回
+    User->>Multi: DPAD_CENTER 长按 / 双击 → switchLayout(下一档)
+    Multi->>Multi: stop 旧格 → 重建新格 slots
+    User->>Multi: MENU → 切换子/主
+    Multi->>Config: setMultiUseSub(!cur)
+    User->>Multi: BACK
+    Multi->>Config: setLastViewMode("multi") + setLastMultiLayout
+    Multi->>Multi: finish()

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">监控直播</string>
+    <string name="main_title">监控通道 - %1$s</string>
+    <string name="settings">设置</string>
+    <string name="multi_view">多画面</string>
+    <string name="multi_view_title">多画面预览</string>
+    <string name="layout_1">单画面</string>
+    <string name="layout_4">4宫格</string>
+    <string name="layout_6">6宫格</string>
+    <string name="layout_9">9宫格</string>
+    <string name="layout_16">16宫格</string>
+    <string name="stream_sub">子码流</string>
+    <string name="stream_main">主码流</string>
+    <string name="toast_switched_layout">宫格布局已切换：%1$s</string>
+    <string name="toast_switched_stream">已切换为%1$s（%2$s）</string>
+    <string name="toast_stream_saved">码流选择已记忆：%1$s</string>
+    <string name="multi_tile_buffering">连接中…</string>
+    <string name="multi_tile_error">连接失败\n%s</string>
+    <string name="multi_hint">方向键移动 · 到边再按翻页 · OK 进入全屏 · 长按OK切换布局 · 菜单切码流</string>
+    <string name="multi_hint_touch">左右滑动翻页 · 单击选布局 · 双击看全屏 · 上下滑调音量</string>
+    <string name="settings_title">设备设置</string>
+    <string name="settings_nvr_host">NVR 地址</string>
+    <string name="settings_rtsp_port">RTSP 端口（视频流）</string>
+    <string name="settings_rtsp_port_hint">视频取流端口，内网默认 554；外网/域名访问填路由器映射的 RTSP 端口</string>
+    <string name="settings_http_port">ISAPI 端口（通道列表 / 缩略图）</string>
+    <string name="settings_http_port_follow">ISAPI 端口与 RTSP 端口相同</string>
+    <string name="settings_username">用户名</string>
+    <string name="settings_password">密码</string>
+    <string name="settings_use_sub_stream">使用子码流（省带宽）</string>
+    <string name="settings_decode_mode">解码模式</string>
+    <string name="settings_decode_mode_hard">硬解</string>
+    <string name="settings_decode_mode_soft">软解</string>
+    <string name="settings_decode_mode_auto">自动</string>
+    <string name="settings_decode_mode_desc_hard">性能好，适合高分辨率主码流；个别摄像头可能出现底部花屏</string>
+    <string name="settings_decode_mode_desc_soft">兼容性最好，画面最稳定；高分辨率可能卡顿</string>
+    <string name="settings_decode_mode_desc_auto">由系统选择可用的解码方式，兼容性介于硬解与软解之间</string>
+    <string name="settings_decode_mode_help">方向键左右移动，按 OK 键选中</string>
+    <string name="toast_settings_saved_decode">设置已保存\n解码模式将在下次开始播放时生效</string>
+    <string name="save">保存</string>
+    <string name="cancel">取消</string>
+    <string name="error_port_range">%1$s 端口无效，请填写 1-65535 之间的数字</string>
+    <string name="error_host_empty">NVR 地址不能为空</string>
+    <string name="toast_port_from_host">已从地址中提取端口 %1$s，已填入 ISAPI 端口</string>
+    <string name="settings_help">说明：\n• NVR地址填 IP 或域名，可带端口（如 nvr.example.com:8080）\n• RTSP端口：视频取流端口，默认 554\n• ISAPI端口：获取通道列表和缩略图的 HTTP 端口，默认 80\n  外网/域名访问时，这里要填路由器映射的 HTTP 端口\n• 两个端口映射成同一个时，勾选“ISAPI 端口与 RTSP 端口相同”\n• 填域名时应用会优先解析为 IPv4，避免 IPv6 优先导致连接超时\n• 通道列表自动从录像机获取\n• 子码流适合多路同时预览\n• 解码模式：软解兼容性最好，硬解性能好但个别摄像头可能底部花屏，改动后下次播放生效\n• 播放时左右键切换通道\n• 菜单键进入设置</string>
+</resources>

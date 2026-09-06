@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 多画面宫格页：宫格容器 + 顶部提示条 -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <!-- 宫格容器：android.widget.GridLayout（API 21+，无需额外依赖），动态添加 ChannelTileView -->
+    <android.widget.GridLayout
+        android:id="@+id/grid_multi"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:columnCount="2"
+        android:rowCount="2"
+        android:orientation="horizontal" />
+
+    <!-- 顶部提示条（遥控器按键说明 / 触屏手势说明） -->
+    <TextView
+        android:id="@+id/tv_hint"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|center_horizontal"
+        android:layout_marginTop="12dp"
+        android:background="#66000000"
+        android:paddingStart="16dp"
+        android:paddingTop="4dp"
+        android:paddingEnd="16dp"
+        android:paddingBottom="4dp"
+        android:textColor="#CCFFFFFF"
+        android:textSize="12sp"
+        android:visibility="gone" />
+
+    <!-- 全屏容器：宫格层之上、翻页栏之下。双击某个宫格后，把该格的 ChannelTileView
+         临时移到此处铺满（引擎不停/不重启，只靠 onSizeChanged 自动重新铺满）；再次双击返回宫格。 -->
+    <FrameLayout
+        android:id="@+id/fullscreen_layer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#000000"
+        android:visibility="gone" />
+
+    <!-- 底部页码指示（轻量、不可点击）：滑动翻页为主交互，此条仅提示当前页/总页数，
+         不拦截触摸（clickable=false，事件穿透到底下的宫格）；仅一页或通道总数未知时隐藏。 -->
+    <TextView
+        android:id="@+id/tv_page_indicator"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="8dp"
+        android:background="#66000000"
+        android:paddingStart="16dp"
+        android:paddingTop="4dp"
+        android:paddingEnd="16dp"
+        android:paddingBottom="4dp"
+        android:clickable="false"
+        android:focusable="false"
+        android:text="‹ 1 / 1 ›"
+        android:textColor="#CCFFFFFF"
+        android:textSize="13sp"
+        android:visibility="gone" />
+
+</FrameLayout>

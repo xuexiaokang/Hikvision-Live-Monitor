@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 选中：亮蓝，深色背景下也清晰可辨（电视遥控器距离远） -->
+    <item android:color="#4DA3FF" android:state_checked="true" />
+    <!-- 未选中：浅灰蓝，避免与深色卡片背景糊在一起 -->
+    <item android:color="#8FAAC4" />
+</selector>

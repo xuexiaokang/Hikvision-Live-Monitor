@@ -1,0 +1,102 @@
+classDiagram
+    class ConfigManager {
+        +boolean isUseSubStream()
+        +void setUseSubStream(boolean)
+        +String getLastViewMode()
+        +void setLastViewMode(String)
+        +int getLastChannelIndex()
+        +void setLastChannelIndex(int)
+        +String getLastStreamType()
+        +void setLastStreamType(String)
+        +int getLastMultiLayout()
+        +void setLastMultiLayout(int)
+        +boolean isMultiUseSub()
+        +void setMultiUseSub(boolean)
+        +String getRtspUrl(int ch)
+        +String getRtspUrlSubStream(int ch)
+    }
+
+    class PlayerEngine {
+        -LibVLC libVLC
+        -MediaPlayer mediaPlayer
+        -Handler handler
+        -Callback listener
+        -boolean expectedPlaying
+        -int freezeRetryCount
+        +PlayerEngine(LibVLC, Callback)
+        +initSurface(Surface)
+        +play(String url)
+        +pause()
+        +stop()
+        +release()
+        -handleEvent(Event)
+    }
+
+    class PlayerEngine~Callback~ {
+        <<interface>>
+        +onPlaying(int ch)
+        +onError(int ch)
+        +onFreeze(int ch)
+        +onBuffering(int ch, float pct)
+    }
+
+    class ChannelTileView {
+        -TextureView textureView
+        -TextView tvChannelName
+        -TextView tvError
+        -PlayerEngine engine
+        -int channelIndex
+        +bind(int ch, boolean useSub, PlayerEngine e)
+        +onVisibleChanged(boolean visible)
+        +setFocusEnabled(boolean)
+        +releaseView()
+    }
+
+    class MultiViewActivity {
+        -ConfigManager config
+        -LibVLC libVLC
+        -PlayerEngine[] engines
+        -ChannelTileView[] slots
+        -int layoutSize
+        -SortedSet~Integer~ visibleSlots
+        -Handler handler
+        +onCreate()
+        +onResume()
+        +onPause()
+        +switchLayout(int newLayout)
+        +startSingle(int channel)
+        +onKeyDown(int, KeyEvent)
+        -createPlayerFor(slot)
+        -stopSlot(slot, delay)
+    }
+
+    class PlayerActivity {
+        -ConfigManager config
+        -PlayerEngine engine
+        -int currentChannelIndex
+        -boolean useSubStream
+        -boolean useCombinedMode
+        +onCreate()
+        +playChannel(int ch, boolean sub)
+        +onKeyDown(...)
+        +releasePlayerAsync()
+    }
+
+    class MainActivity {
+        -ConfigManager config
+        +onCreate()
+        +onResume()
+        -restoreLastSession()
+        +onChannelClick(int ch)
+    }
+
+    MultiViewActivity --> MultiViewActivity : startSingle()
+    MultiViewActivity --> PlayerActivity : startActivity(ch, stream)
+    MultiViewActivity --> PlayerEngine : create per slot
+    MultiViewActivity <-- ChannelTileView : binds engine
+    ChannelTileView --> PlayerEngine : play/pause/stop
+    PlayerEngine ..> PlayerEngine.Callback : notifies
+    PlayerActivity --> ConfigManager
+    MultiViewActivity --> ConfigManager
+    MainActivity --> ConfigManager
+    PlayerActivity ..> PlayerEngine : 可选复用
