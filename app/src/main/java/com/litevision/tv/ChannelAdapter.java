@@ -210,10 +210,15 @@ public class ChannelAdapter extends RecyclerView.Adapter<ChannelAdapter.ChannelV
             // 现在 IV 常驻 VISIBLE + placeholder：抓帧进行中是深蓝色块；抓帧成功后 Bitmap 覆盖；
             // 抓帧最终失败也是 placeholder，永远不黑屏。
             ivThumbnail.setVisibility(View.VISIBLE);
-            ivThumbnail.setImageResource(R.drawable.thumbnail_placeholder);
-            final ImageView ivFinal = ivThumbnail;
-            final TextureView tvFinal = tvThumbnail;
-            itemView.post(() -> waitTvAndStartGrab(ivFinal, tvFinal, channelIndex, System.currentTimeMillis()));
+            if (thumbnailLoader.hasCached(channelIndex)) {
+                // 已有本地缓存：直接 load()（内部命中缓存走 loadInto 异步回填，不需等 TV ready）
+                thumbnailLoader.load(ivThumbnail, tvThumbnail, channelIndex);
+            } else {
+                ivThumbnail.setImageResource(R.drawable.thumbnail_placeholder);
+                final ImageView ivFinal = ivThumbnail;
+                final TextureView tvFinal = tvThumbnail;
+                itemView.post(() -> waitTvAndStartGrab(ivFinal, tvFinal, channelIndex, System.currentTimeMillis()));
+            }
         }
 
         private void waitTvAndStartGrab(final ImageView ivFinal, final TextureView tvFinal,

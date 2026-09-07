@@ -252,6 +252,11 @@ public class ThumbnailLoader {
      * 现在 TV 的 ST 由 ChannelViewHolder 永驻 listener 缓存，TV 一旦 ST available
      * 就可立即抓帧（不再需要 post + 等 isAvailable 轮询）。
      */
+    /** 是否已有该通道的本地缓存缩略图（getFilesDir()/thumbnails/chXX.jpg）。 */
+    public boolean hasCached(int channelIndex) {
+        return appContext != null && ThumbnailCache.hasCached(appContext, channelIndex);
+    }
+
     public void load(ImageView imageView, android.view.TextureView tv, int channelIndex) {
         if (stopped || config == null) {
             imageView.setImageResource(R.drawable.thumbnail_placeholder);
@@ -276,7 +281,6 @@ public class ThumbnailLoader {
         // 命中即返回，不再触发 HTTP/RTSP 抓帧（节省 NVR 并发额度）。
         if (appContext != null && ThumbnailCache.hasCached(appContext, channelIndex)) {
             imageView.setVisibility(View.VISIBLE);
-            imageView.setImageResource(R.drawable.thumbnail_placeholder);
             imageView.setTag(key);
             ThumbnailCache.loadInto(appContext, channelIndex, imageView, key);
             return;
@@ -452,8 +456,13 @@ public class ThumbnailLoader {
                                 for (ImageView view : snapshot) {
                                     if (key.equals(view.getTag())) {
                                         // ★ 显出来 + 贴 placeholder：兜底永远不让用户看到纯黑矩形
-                                        view.setVisibility(View.VISIBLE);
-                                        view.setImageResource(R.drawable.thumbnail_placeholder);
+                                        if (appContext != null && ThumbnailCache.hasCached(appContext, channelIndex)) {
+                                            view.setVisibility(View.VISIBLE);
+                                            ThumbnailCache.loadInto(appContext, channelIndex, view, key);
+                                        } else {
+                                            view.setVisibility(View.VISIBLE);
+                                            view.setImageResource(R.drawable.thumbnail_placeholder);
+                                        }
                                     }
                                 }
                             });
