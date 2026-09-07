@@ -1,6 +1,5 @@
 package com.litevision.tv;
 
-import android.content.Intent;
 import android.content.res.Configuration;
 import android.graphics.Matrix;
 import android.graphics.SurfaceTexture;
@@ -182,8 +181,8 @@ public class PlayerActivity extends AppCompatActivity {
     private static final float DBL_TAP_SLOP_PX = 120f;     // 两击坐标偏移容忍
     private long mManualDoubleTapAtMs = 0L;                // 手写双击命中时刻（抑制第一击的单击 overlay）
     private long mLastDblDownTime = -1L;                    // 同一物理事件去重
-    /** 本次退出是"双击主动返回多画面"。用于 onStop 别用 single 覆写已写好的 multi（见 exitSingleToMulti）。 */
-    private boolean mExitToMulti = false;
+    /** 本次退出是"双击主动退出单画面"（回宫格或回列表，见 exitSingleToMulti）。用于 onStop 别用默认 single 覆写已写好的记忆。 */
+    private boolean mManualDblTapExit = false;
 
     // ===== 缩略图截图（"真实播放帧做缩略图"方案）=====
     /**
@@ -1680,30 +1679,28 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     /**
-     * 双击退出单画面返回多画面：写回 multi 记忆后回归 MultiViewActivity 宫格。
+     * 双击退出单画面：回到进入单画面前的入口（宫格→宫格，列表→列表）。
      *
-     * 两种入口的回法不同（否则会停在通道列表 / 下次冷启动直进单画面）：
-     *   - fromMulti=true：栈上已有 MultiViewActivity，finish() 直接回去，无闪烁、不重建取流。
-     *   - fromMulti=false：栈上是通道列表，显式启动 MultiViewActivity 后再 finish，
-     *     避免停在列表而用户以为"没切回多画面"；回键可退回列表，符合预期。
+     * 直接 finish() 即可——栈上已有来源页（MultiViewActivity 或 MainActivity），
+     * finish 自然回到来源页。不要显式启动 MultiViewActivity：从列表进入的单画面，
+     * 双击该回的是**列表**，显式启动宫格反而会"返回到多画面"（正是要修的 bug）。
+     *
+     * 记忆写入按入口区分：fromMulti=true 写 multi（下次冷启动回宫格），
+     * fromMulti=false 写 list（下次冷启动停在通道列表），否则默认的 single 会把用户
+     * 冷启动拉回刚离开的单画面，而不是停在列表。
      */
     private void exitSingleToMulti() {
-        mExitToMulti = true; // 告知 onStop：本次主动返回多画面，别用 single 覆写
+        mManualDblTapExit = true; // 告知 onStop：本次双击主动退出，别用默认 single 覆写已写好的记忆
         try {
             if (config != null) {
-                config.setLastViewMode("multi");
+                config.setLastViewMode(fromMulti ? "multi" : "list");
                 // 保留上次布局记忆（MultiViewActivity.onStop 也会写，这里双保险），
                 // 通道索引保持当前值，下次冷启动回多画面宫格而非单画面。
             }
         } catch (Throwable t) {
-            Log.w(TAG, "双击返回写 multi 记忆异常: " + t.getMessage());
+            Log.w(TAG, "双击返回写记忆异常: " + t.getMessage());
         }
-        if (fromMulti) {
-            finish();
-        } else {
-            startActivity(new Intent(this, MultiViewActivity.class));
-            finish();
-        }
+        finish();
     }
 
     @Override
@@ -1928,17 +1925,21 @@ public class PlayerActivity extends AppCompatActivity {
     @Override
     protected void onStop() {
         super.onStop();
-        // ===== 退出记忆：写 last_view_mode=single + 通道 + 码流偏好 =====
+        // ===== 退出记忆：写 last_view_mode + 通道 + 码流偏好 =====
         // 设计 §5：单画面退出后下次冷启动直进单画面对应通道。
-        // 例外：双击主动返回多画面（exitSingleToMulti 已写 multi），或从多画面进入的本页
+        // 例外：双击主动退出（exitSingleToMulti 已按入口写好记忆），或从多画面进入的本页
         //       （fromMulti=true），无论系统返回键、Home 杀进程还是直接退出（只走 onStop），
-        //       都必须统一把 last_view_mode 覆写为 "multi"——兜底 MultiViewActivity.startPlayer
-        //       进入时无条件写的 "single"，否则下次冷启动会错误直进单画面而不是回多画面宫格。
+        //       都必须把 last_view_mode 覆写为对应入口值——兜底 MultiViewActivity.startPlayer
+        //       进入时无条件写的 "single"，否则下次冷启动会错误直进单画面而不是回到来源页。
+        //       注意 fromMulti=false 且双击退出时写 "list"（回通道列表），不是 "multi"。
         try {
             if (config != null) {
-                if (fromMulti || mExitToMulti) {
-                    // 统一兜底：任意退出路径下次都回多画面
+                if (fromMulti) {
+                    // 从多画面进入：任意退出路径下次都回多画面宫格
                     config.setLastViewMode("multi");
+                } else if (mManualDblTapExit) {
+                    // 从列表进入、双击主动退出：回通道列表（冷启动停在列表）
+                    config.setLastViewMode("list");
                 } else {
                     config.setLastViewMode("single");
                     config.setLastChannelIndex(currentChannelIndex);
@@ -1949,8 +1950,9 @@ public class PlayerActivity extends AppCompatActivity {
                 } else {
                     config.setLastStreamType(useSubStream ? "sub" : "main");
                 }
-                String stopReason = (mExitToMulti ? "multi(双击主动返回多画面)"
-                        : (fromMulti ? "multi(多画面进入，统一回多画面)" : "single"));
+                String stopReason = mManualDblTapExit
+                        ? (fromMulti ? "multi(双击返回宫格)" : "list(双击返回列表)")
+                        : (fromMulti ? "multi(多画面进入，统一回多画面)" : "single");
                 Log.i(TAG, "onStop: 保存上次状态 " + stopReason
                         + " ch=" + currentChannelIndex
                         + " streamType=" + config.getLastStreamType());
