@@ -1,9 +1,56 @@
 <?xml version="1.0" encoding="utf-8"?>
-<shape xmlns:android="http://schemas.android.com/apk/res/android"
-    android:shape="rectangle">
-    <solid android:color="#132F4C" />
-    <corners android:radius="8dp" />
-    <stroke
-        android:width="3dp"
-        android:color="#0D47A1" />
-</shape>
+<!-- 焦点态：纯白主环 + 双层向外衰减的白光晕（电视端远距离可见的焦点高亮）
+     全 App 唯一焦点 drawable：ChannelTileView / ChannelAdapter / MainActivity /
+     SettingsActivity（输入框 + 解码模式 RadioGroup + 测试/保存/取消按钮）共用。
+
+     设计要点（勿改坏）：
+     1. 三层向外衰减：主环纯白 4dp → 中层 35% 白 → 外层 10% 白，模拟发光扩散
+     2. 主卡片 inset 4dp：让外两层光晕在 0~4dp 环带可见（v1 只 inset 2dp，光晕太窄被用户投诉）
+     3. 底色 #132F4C 与 channel_card_normal 一致，避免焦点切换时底色跳变
+     4. minSdk 21：inset 必须用 left/top/right/bottom 四属性写法，
+        禁止 android:inset（API 23+）
+     5. stroke 不占布局空间，焦点切换不引起布局抖动；
+        主卡片 inset 4dp 仅缩小背景绘制区，内容有 padding 不受影响 -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 外层光晕：10% 白，最宽最淡 -->
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#00000000" />
+            <corners android:radius="12dp" />
+            <stroke
+                android:width="8dp"
+                android:color="#1AFFFFFF" />
+        </shape>
+    </item>
+
+    <!-- 中层光晕：35% 白，向内收 2dp -->
+    <item
+        android:left="2dp"
+        android:top="2dp"
+        android:right="2dp"
+        android:bottom="2dp">
+        <shape android:shape="rectangle">
+            <solid android:color="#00000000" />
+            <corners android:radius="10dp" />
+            <stroke
+                android:width="6dp"
+                android:color="#59FFFFFF" />
+        </shape>
+    </item>
+
+    <!-- 主卡片：深蓝底 + 纯白主环 4dp（明显加粗，v1 是 3dp） -->
+    <item
+        android:left="4dp"
+        android:top="4dp"
+        android:right="4dp"
+        android:bottom="4dp">
+        <shape android:shape="rectangle">
+            <solid android:color="#132F4C" />
+            <corners android:radius="8dp" />
+            <stroke
+                android:width="4dp"
+                android:color="#FFFFFFFF" />
+        </shape>
+    </item>
+</layer-list>

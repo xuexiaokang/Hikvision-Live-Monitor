@@ -31,7 +31,7 @@
             android:id="@+id/et_host"
             android:layout_width="match_parent"
             android:layout_height="56dp"
-            android:background="@drawable/channel_card_normal"
+            android:background="@drawable/channel_card_selector"
             android:hint="192.168.1.23"
             android:inputType="text"
             android:paddingStart="16dp"
@@ -53,7 +53,7 @@
             android:id="@+id/et_port"
             android:layout_width="match_parent"
             android:layout_height="56dp"
-            android:background="@drawable/channel_card_normal"
+            android:background="@drawable/channel_card_selector"
             android:hint="554"
             android:inputType="number"
             android:paddingStart="16dp"
@@ -84,7 +84,7 @@
             android:id="@+id/et_http_port"
             android:layout_width="match_parent"
             android:layout_height="56dp"
-            android:background="@drawable/channel_card_normal"
+            android:background="@drawable/channel_card_selector"
             android:hint="80"
             android:inputType="number"
             android:paddingStart="16dp"
@@ -120,7 +120,7 @@
             android:id="@+id/et_username"
             android:layout_width="match_parent"
             android:layout_height="56dp"
-            android:background="@drawable/channel_card_normal"
+            android:background="@drawable/channel_card_selector"
             android:hint="admin"
             android:inputType="text"
             android:paddingStart="16dp"
@@ -143,7 +143,7 @@
             android:id="@+id/et_password"
             android:layout_width="match_parent"
             android:layout_height="56dp"
-            android:background="@drawable/channel_card_normal"
+            android:background="@drawable/channel_card_selector"
             android:hint="password"
             android:inputType="textPassword"
             android:paddingStart="16dp"
@@ -259,7 +259,14 @@
             android:orientation="horizontal"
             android:gravity="center">
 
-            <Button
+            <!-- 必须写全限定名 android.widget.Button：本 App 主题是
+                 Theme.MaterialComponents.NoActionBar，裸 <Button> 会被 inflate 成
+                 MaterialButton，它自行接管 background，导致 XML 的 android:background
+                 与 Java 的 setBackgroundResource() 双双失效（表现为常态是 Material 蓝
+                 #0D47A1、聚焦无白环）。改用平台 Button 后二者恢复正常。
+                 elevation / stateListAnimator 归零：平台 Widget.Material.Button 自带
+                 1dp 抬升与按压动画，会让按钮在全站扁平卡片风格里显得"浮起来"。 -->
+            <android.widget.Button
                 android:id="@+id/btn_test"
                 android:layout_width="0dp"
                 android:layout_weight="1"
@@ -268,11 +275,13 @@
                 android:textSize="18sp"
                 android:background="@drawable/channel_card_normal"
                 android:textColor="#FFFFFF"
+                android:elevation="0dp"
+                android:stateListAnimator="@null"
                 android:layout_marginEnd="12dp"
                 android:nextFocusRight="@id/btn_save"
                 android:nextFocusUp="@id/rb_decode_soft" />
 
-            <Button
+            <android.widget.Button
                 android:id="@+id/btn_save"
                 android:layout_width="0dp"
                 android:layout_weight="1"
@@ -281,13 +290,15 @@
                 android:textSize="18sp"
                 android:background="@drawable/channel_card_normal"
                 android:textColor="#FFFFFF"
+                android:elevation="0dp"
+                android:stateListAnimator="@null"
                 android:layout_marginStart="12dp"
                 android:layout_marginEnd="12dp"
                 android:nextFocusLeft="@id/btn_test"
                 android:nextFocusRight="@id/btn_cancel"
                 android:nextFocusUp="@id/rb_decode_hard" />
 
-            <Button
+            <android.widget.Button
                 android:id="@+id/btn_cancel"
                 android:layout_width="0dp"
                 android:layout_weight="1"
@@ -296,6 +307,8 @@
                 android:textSize="18sp"
                 android:background="@drawable/channel_card_normal"
                 android:textColor="#CCFFFFFF"
+                android:elevation="0dp"
+                android:stateListAnimator="@null"
                 android:layout_marginStart="12dp"
                 android:nextFocusLeft="@id/btn_save"
                 android:nextFocusUp="@id/rb_decode_auto" />
@@ -309,6 +322,40 @@
             android:textSize="14sp"
             android:layout_marginTop="32dp"
             android:lineSpacingExtra="4dp" />
+
+        <!-- 作者署名（卡片底部） -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:layout_marginTop="32dp"
+            android:paddingTop="16dp"
+            android:paddingBottom="16dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_author_xxkwz"
+                android:textColor="@color/text_hint"
+                android:textSize="13sp"
+                android:lineSpacingExtra="2dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_author_ztfans"
+                android:textColor="@color/text_hint"
+                android:textSize="13sp"
+                android:lineSpacingExtra="2dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_author_github"
+                android:textColor="@color/text_hint"
+                android:textSize="13sp" />
+        </LinearLayout>
 
     </LinearLayout>
 </ScrollView>

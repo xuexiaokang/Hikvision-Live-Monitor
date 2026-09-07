@@ -1,5 +1,6 @@
 package com.litevision.tv;
 
+import android.content.Intent;
 import android.content.res.Configuration;
 import android.graphics.Matrix;
 import android.graphics.SurfaceTexture;
@@ -61,7 +62,8 @@ public class PlayerActivity extends AppCompatActivity {
     public static final String EXTRA_CHANNEL_INDEX = "channel_index";
     /** 码流偏好："sub"/"main"/"auto"（auto=回退全局 use_sub_stream） */
     public static final String EXTRA_STREAM_TYPE = "stream_type";
-    /** 是否来自多画面全屏进入（true：双击退出返回多画面；false：普通单画面无此行为） */
+    /** 是否来自多画面全屏进入（true：双击退出时 finish 回栈上已有宫格；false：显式启动宫格再 finish）。
+     *  与"能否双击退出"无关——双击退出对所有入口统一生效，本字段只决定退出方式。 */
     public static final String EXTRA_FROM_MULTI = "from_multi";
 
     private static final String TAG = "LiteVisionPlayer";
@@ -168,8 +170,8 @@ public class PlayerActivity extends AppCompatActivity {
      */
     private int swipeThreshold = SWIPE_THRESHOLD;
 
-    // ===== 多画面进入的独立单画面页：双击退出返回多画面 =====
-    /** 由多画面独立取流进入（EXTRA_FROM_MULTI=true）。仅该值时，单画面页双击才 finish() 返回多画面。 */
+    // ===== 单画面双击退出返回多画面（所有入口统一生效）=====
+    /** 由多画面独立取流进入（EXTRA_FROM_MULTI=true）。仅决定退出方式（finish vs 显式启动），不决定能否退出。 */
     private boolean fromMulti = false;
 
     // 手写双击检测（与 MultiViewActivity 同一套：Activity 顶部 dispatchTouchEvent，绝不被子 View 拦截）
@@ -180,6 +182,8 @@ public class PlayerActivity extends AppCompatActivity {
     private static final float DBL_TAP_SLOP_PX = 120f;     // 两击坐标偏移容忍
     private long mManualDoubleTapAtMs = 0L;                // 手写双击命中时刻（抑制第一击的单击 overlay）
     private long mLastDblDownTime = -1L;                    // 同一物理事件去重
+    /** 本次退出是"双击主动返回多画面"。用于 onStop 别用 single 覆写已写好的 multi（见 exitSingleToMulti）。 */
+    private boolean mExitToMulti = false;
 
     // ===== 缩略图截图（"真实播放帧做缩略图"方案）=====
     /**
@@ -655,7 +659,8 @@ public class PlayerActivity extends AppCompatActivity {
     // ===== 触控支持（仅触屏设备启用，电视端不设置避免影响遥控）=====
     // 手势说明（与遥控键位语义一一对应）：
     //   单击      = KEYCODE_DPAD_CENTER 短按 → 显示/隐藏通道信息
-    //   双击      = 播放/暂停（isPlaying + videoMediaPlayer.pause()/play()）
+    //   双击      = 返回多画面宫格（手写检测，在detector之前抢到第2击DOWN并消费）
+    //              松散双击（>320ms / >120px）仍会落到detector的onDoubleTap → 播放/暂停
     //   左右滑动   = KEYCODE_DPAD_LEFT / RIGHT → 上/下一个通道
     //   上下滑动   = 音量 +/-
     private void initTouchSupport() {
@@ -686,7 +691,9 @@ public class PlayerActivity extends AppCompatActivity {
                 // 抑制：手写双击（exitSingleToMulti）命中时，其第一击/后续单击确认会晚到，
                 // 且设备可能先触发本确认再执行 dispatchTouchEvent 的 finish——此时页已在退出中，
                 // 不再切换 overlay（避免"想退出却抖出通道信息"）。
-                if (fromMulti && Math.abs(System.currentTimeMillis() - mManualDoubleTapAtMs) < 600L) {
+                // mManualDoubleTapAtMs 只在手写双击命中时置位，与 fromMulti 无关，
+                // 故抑制门不看 fromMulti：从列表进入的单画面同样要抑制。
+                if (Math.abs(System.currentTimeMillis() - mManualDoubleTapAtMs) < 600L) {
                     Log.d(TAG, "抑制单画面双击第一击的单击 overlay");
                     return true;
                 }
@@ -734,8 +741,8 @@ public class PlayerActivity extends AppCompatActivity {
 
             @Override
             public boolean onDoubleTap(MotionEvent e) {
-                // 双击 → 播放/暂停
-                Log.i(TAG, "👆 双击 → 播放/暂停");
+                // 兜底：紧凑双击已被手写检测抢走（返回多画面），这里只收到松散双击 → 播放/暂停
+                Log.i(TAG, "👆 双击(松散) → 播放/暂停");
                 if (isReleased || videoMediaPlayer == null) return true;
                 try {
                     if (isPlaying && videoMediaPlayer.isPlaying()) {
@@ -1636,15 +1643,19 @@ public class PlayerActivity extends AppCompatActivity {
         return super.onKeyDown(keyCode, event);
     }
 
-    // ===== 多画面进入的单画面页：双击退出返回多画面 =====
+    // ===== 单画面双击退出返回多画面（所有入口统一生效）=====
 
     /**
      * DOWN 时手写双击判定（与 MultiViewActivity 同套：Activity 级 dispatchTouchEvent 最底层，
-     * 绝不被内层 view 拦截）。仅 fromMulti（多画面独立取流进入）时双击才 finish() 返回多画面；
-     * 普通进入（单机/列表）保持原有行为不变。同一物理事件（downTime）只判定一次，防多入口自误判。
+     * 绝不被内层 view 拦截）。
+     *
+     * 双击 = 返回多画面（统一入口，与进入方式无关）。
+     * 之所以手写而不是靠detector：detector的onDoubleTap要拿去播/暂停，这里要在它之前抢到第2击DOWN
+     * 并消费掉，否则双击会先触发播/暂停再触发返回，用户看到"画面闪一下才退出"。
+     *
+     * 同一物理事件（downTime）只判定一次，防多入口自误判。
      */
     private boolean detectExitDoubleTapDown(MotionEvent e) {
-        if (!fromMulti) return false;
         if (e.getActionMasked() != MotionEvent.ACTION_DOWN) return false;
         if (e.getDownTime() == mLastDblDownTime) return false;
         mLastDblDownTime = e.getDownTime();
@@ -1668,8 +1679,16 @@ public class PlayerActivity extends AppCompatActivity {
         return false;
     }
 
-    /** 双击退出单画面返回多画面：写回 multi 记忆后 finish()，回归 MultiViewActivity 宫格。 */
+    /**
+     * 双击退出单画面返回多画面：写回 multi 记忆后回归 MultiViewActivity 宫格。
+     *
+     * 两种入口的回法不同（否则会停在通道列表 / 下次冷启动直进单画面）：
+     *   - fromMulti=true：栈上已有 MultiViewActivity，finish() 直接回去，无闪烁、不重建取流。
+     *   - fromMulti=false：栈上是通道列表，显式启动 MultiViewActivity 后再 finish，
+     *     避免停在列表而用户以为"没切回多画面"；回键可退回列表，符合预期。
+     */
     private void exitSingleToMulti() {
+        mExitToMulti = true; // 告知 onStop：本次主动返回多画面，别用 single 覆写
         try {
             if (config != null) {
                 config.setLastViewMode("multi");
@@ -1679,7 +1698,12 @@ public class PlayerActivity extends AppCompatActivity {
         } catch (Throwable t) {
             Log.w(TAG, "双击返回写 multi 记忆异常: " + t.getMessage());
         }
-        finish();
+        if (fromMulti) {
+            finish();
+        } else {
+            startActivity(new Intent(this, MultiViewActivity.class));
+            finish();
+        }
     }
 
     @Override
@@ -1906,13 +1930,13 @@ public class PlayerActivity extends AppCompatActivity {
         super.onStop();
         // ===== 退出记忆：写 last_view_mode=single + 通道 + 码流偏好 =====
         // 设计 §5：单画面退出后下次冷启动直进单画面对应通道。
-        // 例外：从多画面进入的本页（fromMulti=true），无论双击返回（exitSingleToMulti 已写 multi）、
-        //       系统返回键、Home 杀进程还是直接退出（只走 onStop），都必须统一把 last_view_mode
-        //       覆写为 "multi"——兜底 MultiViewActivity.startPlayer 进入时无条件写的 "single"，
-        //       否则下次冷启动会错误直进单画面而不是回多画面宫格。
+        // 例外：双击主动返回多画面（exitSingleToMulti 已写 multi），或从多画面进入的本页
+        //       （fromMulti=true），无论系统返回键、Home 杀进程还是直接退出（只走 onStop），
+        //       都必须统一把 last_view_mode 覆写为 "multi"——兜底 MultiViewActivity.startPlayer
+        //       进入时无条件写的 "single"，否则下次冷启动会错误直进单画面而不是回多画面宫格。
         try {
             if (config != null) {
-                if (fromMulti) {
+                if (fromMulti || mExitToMulti) {
                     // 统一兜底：任意退出路径下次都回多画面
                     config.setLastViewMode("multi");
                 } else {
@@ -1925,7 +1949,9 @@ public class PlayerActivity extends AppCompatActivity {
                 } else {
                     config.setLastStreamType(useSubStream ? "sub" : "main");
                 }
-                Log.i(TAG, "onStop: 保存上次状态 " + (fromMulti ? "multi(多画面进入，统一回多画面)" : "single")
+                String stopReason = (mExitToMulti ? "multi(双击主动返回多画面)"
+                        : (fromMulti ? "multi(多画面进入，统一回多画面)" : "single"));
+                Log.i(TAG, "onStop: 保存上次状态 " + stopReason
                         + " ch=" + currentChannelIndex
                         + " streamType=" + config.getLastStreamType());
             }

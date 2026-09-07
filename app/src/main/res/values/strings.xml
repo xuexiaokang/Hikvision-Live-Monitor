@@ -43,4 +43,7 @@
     <string name="error_host_empty">NVR 地址不能为空</string>
     <string name="toast_port_from_host">已从地址中提取端口 %1$s，已填入 ISAPI 端口</string>
     <string name="settings_help">说明：\n• NVR地址填 IP 或域名，可带端口（如 nvr.example.com:8080）\n• RTSP端口：视频取流端口，默认 554\n• ISAPI端口：获取通道列表和缩略图的 HTTP 端口，默认 80\n  外网/域名访问时，这里要填路由器映射的 HTTP 端口\n• 两个端口映射成同一个时，勾选“ISAPI 端口与 RTSP 端口相同”\n• 填域名时应用会优先解析为 IPv4，避免 IPv6 优先导致连接超时\n• 通道列表自动从录像机获取\n• 子码流适合多路同时预览\n• 解码模式：软解兼容性最好，硬解性能好但个别摄像头可能底部花屏，改动后下次播放生效\n• 播放时左右键切换通道\n• 菜单键进入设置</string>
+    <string name="settings_author_xxkwz">情绪21℃：Www.XXKwz.Cn</string>
+    <string name="settings_author_ztfans">折腾爱好者：Www.ZTFans.Com</string>
+    <string name="settings_author_github">开源：laolaojia</string>
 </resources>

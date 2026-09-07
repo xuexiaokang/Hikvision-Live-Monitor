@@ -23,7 +23,10 @@
             android:textSize="28sp"
             android:textStyle="bold" />
 
-        <Button
+        <!-- 与设置页同理：写全限定名 android.widget.Button，避免被 MaterialComponents
+             主题 inflate 成 MaterialButton 而吃掉 android:background 与 Java 的
+             setBackgroundResource()（否则常态是 Material 蓝 #0D47A1、聚焦无白环）。 -->
+        <android.widget.Button
             android:id="@+id/btn_multi_view"
             android:layout_width="wrap_content"
             android:layout_height="56dp"
@@ -31,13 +34,15 @@
             android:textSize="16sp"
             android:background="@drawable/channel_card_normal"
             android:textColor="#CCFFFFFF"
+            android:elevation="0dp"
+            android:stateListAnimator="@null"
             android:paddingStart="24dp"
             android:paddingEnd="24dp"
             android:layout_marginEnd="12dp"
             android:nextFocusRight="@id/btn_settings"
             android:nextFocusDown="@id/recycler_channels" />
 
-        <Button
+        <android.widget.Button
             android:id="@+id/btn_settings"
             android:layout_width="wrap_content"
             android:layout_height="56dp"
@@ -45,6 +50,8 @@
             android:textSize="16sp"
             android:background="@drawable/channel_card_normal"
             android:textColor="#CCFFFFFF"
+            android:elevation="0dp"
+            android:stateListAnimator="@null"
             android:paddingStart="24dp"
             android:paddingEnd="24dp"
             android:nextFocusLeft="@id/btn_multi_view"

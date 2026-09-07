@@ -29,8 +29,9 @@ _checksum*.txt
 apk_check.txt
 build_final_check.log
 _test_*.png
-_*.png
-*.log
+    _*.png
+    *.log
+    ui_*.xml            # uiautomator dump 测试残留（QA/验证用，含设备 UI 层级快照）
 
 # ===== WorkBuddy AI 工作区 =====
 # 记忆/截图/验证脚本/调试中间产物均为本地 AI 工作区，

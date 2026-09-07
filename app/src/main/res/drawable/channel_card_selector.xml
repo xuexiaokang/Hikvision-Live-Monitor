@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 卡片背景状态选择器：常态 channel_card_normal / 聚焦态 channel_card_focused（三层白光）。
+     用途：修复 SettingsActivity 5 个输入框（et_host / et_port / et_http_port /
+     et_username / et_password）聚焦时无白光的问题 —— 这些 EditText 在 XML 里只写了
+     静态 android:background，且 Java 未给它们挂 OnFocusChangeListener，
+     仅靠 XML 静态背景无法切换到焦点态。挂上本 selector 后由 View 的 drawableState
+     自动切换，无需改动任何 Java 代码。
+
+     注意（勿改坏）：
+     1. 顺序敏感 —— state_focused 分支必须写在无状态限定的兜底分支之前，
+        StateListDrawable 自上而下取第一个匹配项
+     2. 兜底分支不带任何 state 限定，覆盖 normal / pressed / disabled 等其余状态；
+        保证 et_http_port 在"跟随 RTSP 端口"被 setEnabled(false) 时仍有正常背景
+     3. 按钮与 RadioButton 仍由各自 Java 的 setBackgroundResource() 切换，
+        不使用本文件，避免与 OnFocusChangeListener 重复设置产生冲突 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:drawable="@drawable/channel_card_focused"
+        android:state_focused="true" />
+    <item android:drawable="@drawable/channel_card_normal" />
+</selector>
