@@ -46,3 +46,6 @@ Thumbs.db
 *.swp
 *.swo
 *~
+# ===== 签名备份（含 keystore，绝不入库）=====
+release-signing-backup-*/
+release-signing-backup-*.zip
