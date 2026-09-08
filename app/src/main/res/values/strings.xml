@@ -4,6 +4,8 @@
     <string name="main_title">监控通道 - %1$s</string>
     <string name="settings">设置</string>
     <string name="multi_view">多画面</string>
+    <string name="refresh_thumbs">刷新缩略图</string>
+    <string name="refresh_thumbs_hint">正在生成缩略图，请稍候…</string>
     <string name="multi_view_title">多画面预览</string>
     <string name="layout_1">单画面</string>
     <string name="layout_4">4宫格</string>

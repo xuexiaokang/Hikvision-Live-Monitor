@@ -55,6 +55,8 @@ public class MultiViewActivity extends AppCompatActivity {
     private static final String TAG = "MultiViewActivity";
 
     public static final String EXTRA_LAYOUT = "layout";
+    /** 自动预热模式：进入后强制 9 宫格播全部通道，逐路截帧写入缩略图缓存，完成后自动 finish 回列表。 */
+    public static final String EXTRA_AUTOCAPTURE = "autocapture";
 
     private static final int MAX_SLOTS = 16;
     private static final int SLOT_STOP_DELAY_MS = 2000;
@@ -105,6 +107,10 @@ public class MultiViewActivity extends AppCompatActivity {
     private int layoutSize = 4;          // 1/4/6/9
     private int focusedSlot = 0;
     private boolean useSubStream = true; // 多画面码流（独立键 multi_use_sub）
+    /** 自动预热模式（列表页"刷新缩略图"按钮触发）：强制 9 宫格 + 截帧后自动回列表。 */
+    private boolean autoCapture = false;
+    /** 自动预热兜底超时（毫秒）：9 路播放 + 2.5s 截帧，留足余量后强制 finish 回列表。 */
+    private static final long AUTO_CAPTURE_TIMEOUT_MS = 15000L;
 
     // ===== 宫格内嵌全屏（双击）状态 =====
     /** 当前内嵌全屏的格子索引；-1 = 普通宫格模式。格子内的 ChannelTileView 被临时移到全屏容器。 */
@@ -245,11 +251,19 @@ public class MultiViewActivity extends AppCompatActivity {
         // 底部页码指示（不可点击，事件穿透到宫格；翻页靠左右滑动/遥控器方向键到边）
         tvPageIndicator = findViewById(R.id.tv_page_indicator);
 
+        // ===== 自动预热模式（列表页"刷新缩略图"按钮）=====
+        autoCapture = getIntent().getBooleanExtra(EXTRA_AUTOCAPTURE, false);
+
         // 启动参数优先（Main 恢复路由会传 EXTRA_LAYOUT），否则取记忆
         int requested = getIntent().getIntExtra(EXTRA_LAYOUT, -1);
-        layoutSize = clampLayout(requested > 0 ? requested : config.getLastMultiLayout());
+        if (autoCapture) {
+            layoutSize = 9; // 强制 9 宫格覆盖全部通道
+        } else {
+            layoutSize = clampLayout(requested > 0 ? requested : config.getLastMultiLayout());
+        }
         useSubStream = config.isMultiUseSub();
-        Log.i(TAG, "onCreate: layout=" + layoutSize + " useSubStream=" + useSubStream);
+        Log.i(TAG, "onCreate: layout=" + layoutSize + " useSubStream=" + useSubStream
+                + " autoCapture=" + autoCapture);
 
         // ===== 单一 LibVLC 实例（实例级 --no-audio：所有格静音）=====
         if (!initLibVlc()) {
@@ -265,9 +279,20 @@ public class MultiViewActivity extends AppCompatActivity {
         // 手势无条件初始化：TV 模式盒子/触屏一体机也常 report TELEVISION，仍应响应双击全屏。
         // isTouchDevice 仅用于提示文案与 pager 显示，不参与手势是否建立。
         initTouchSupport();
-        setHint(isTouchDevice
-                ? getString(R.string.multi_hint_touch)
-                : getString(R.string.multi_hint));
+        if (autoCapture) {
+            setHint(getString(R.string.refresh_thumbs_hint));
+            // 兜底超时：无论截帧是否全部成功，到点都 finish 回列表，避免卡死在多画面。
+            handler.postDelayed(() -> {
+                if (!isFinishing() && !isDestroyed()) {
+                    Log.i(TAG, "自动预热超时（" + AUTO_CAPTURE_TIMEOUT_MS + "ms），finish 回列表");
+                    finish();
+                }
+            }, AUTO_CAPTURE_TIMEOUT_MS);
+        } else {
+            setHint(isTouchDevice
+                    ? getString(R.string.multi_hint_touch)
+                    : getString(R.string.multi_hint));
+        }
         refreshPager();
     }
 
@@ -308,12 +333,16 @@ public class MultiViewActivity extends AppCompatActivity {
     protected void onStop() {
         super.onStop();
         // ===== 退出记忆（设计 §5）：last_view_mode=multi + 布局 =====
-        try {
-            config.setLastViewMode("multi");
-            config.setLastMultiLayout(layoutSize);
-            Log.i(TAG, "onStop: 保存上次状态 multi layout=" + layoutSize);
-        } catch (Throwable t) {
-            Log.w(TAG, "保存 multi 状态失败: " + t.getMessage());
+        // 自动预热模式不写记忆：用户从列表点"刷新缩略图"进来，回列表后仍应停留列表，
+        // 否则下次冷启动会被 restoreLastSession 直接拽回多画面。
+        if (!autoCapture) {
+            try {
+                config.setLastViewMode("multi");
+                config.setLastMultiLayout(layoutSize);
+                Log.i(TAG, "onStop: 保存上次状态 multi layout=" + layoutSize);
+            } catch (Throwable t) {
+                Log.w(TAG, "保存 multi 状态失败: " + t.getMessage());
+            }
         }
         stopAllSlots();
     }

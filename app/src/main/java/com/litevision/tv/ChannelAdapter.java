@@ -214,37 +214,14 @@ public class ChannelAdapter extends RecyclerView.Adapter<ChannelAdapter.ChannelV
                 // 已有本地缓存：直接 load()（内部命中缓存走 loadInto 异步回填，不需等 TV ready）
                 thumbnailLoader.load(ivThumbnail, tvThumbnail, channelIndex);
             } else {
+                // 无缓存：只显示 placeholder，不再发起 HTTP ISAPI / RTSP 抓帧。
+                // 原因（2026-09-08 真机结论）：① ISAPI 对 InputProxy 代理通道 /picture 返回 403
+                // （海康不对外提供代理通道抓图）；② RTSP 离屏/列表 TV 抓帧在 MuMu 上 libVLC
+                // 合成层不出帧（frames=0）。两条路都必然失败，只是给 NVR 徒增并发压力。
+                // 缩略图改由"播放页 / 多画面播放时截帧"（ThumbnailCapture）写入缓存，
+                // 未播放过的通道保持 placeholder，播放过一次后自动有图（"保留优先"原则）。
                 ivThumbnail.setImageResource(R.drawable.thumbnail_placeholder);
-                final ImageView ivFinal = ivThumbnail;
-                final TextureView tvFinal = tvThumbnail;
-                itemView.post(() -> waitTvAndStartGrab(ivFinal, tvFinal, channelIndex, System.currentTimeMillis()));
-            }
-        }
-
-        private void waitTvAndStartGrab(final ImageView ivFinal, final TextureView tvFinal,
-                                        final int channelIndex, final long startMs) {
-            if (thumbnailLoader == null) return;
-            if (tvFinal == null) return;
-            // RV itemHolder 已被回收（在途等待中就 recycle 了）→ 不再启动抓帧
-            if (getBindingAdapterPosition() == RecyclerView.NO_POSITION) {
-                return;
-            }
-            // TV 已 attached 且 SurfaceTexture 已创建 → 启动抓帧
-            if (tvFinal.isAttachedToWindow() && tvFinal.isAvailable()
-                    && tvFinal.getSurfaceTexture() != null) {
-                Log.i(TAG, "TV ready ch=" + channelIndex + "（耗时 "
-                        + (System.currentTimeMillis() - startMs) + "ms），启动抓帧");
-                thumbnailLoader.load(ivFinal, tvFinal, channelIndex);
-                return;
-            }
-            // 仍未就绪：最多等 3 秒，每 ~16ms 检查一次
-            if (System.currentTimeMillis() - startMs < 3000L) {
-                itemView.postDelayed(() -> waitTvAndStartGrab(ivFinal, tvFinal, channelIndex, startMs), 16L);
-            } else {
-                Log.w(TAG, "等 TV available 超时（3s） ch=" + channelIndex
-                        + " attached=" + tvFinal.isAttachedToWindow()
-                        + " available=" + tvFinal.isAvailable()
-                        + " st=" + (tvFinal.getSurfaceTexture() != null));
+                Log.i(TAG, "ch" + channelIndex + " 无缓存，等待进入播放页生成缩略图");
             }
         }
 

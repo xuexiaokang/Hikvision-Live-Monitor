@@ -27,6 +27,22 @@
              主题 inflate 成 MaterialButton 而吃掉 android:background 与 Java 的
              setBackgroundResource()（否则常态是 Material 蓝 #0D47A1、聚焦无白环）。 -->
         <android.widget.Button
+            android:id="@+id/btn_refresh_thumbs"
+            android:layout_width="wrap_content"
+            android:layout_height="56dp"
+            android:text="@string/refresh_thumbs"
+            android:textSize="16sp"
+            android:background="@drawable/channel_card_normal"
+            android:textColor="#CCFFFFFF"
+            android:elevation="0dp"
+            android:stateListAnimator="@null"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:layout_marginEnd="12dp"
+            android:nextFocusRight="@id/btn_multi_view"
+            android:nextFocusDown="@id/recycler_channels" />
+
+        <android.widget.Button
             android:id="@+id/btn_multi_view"
             android:layout_width="wrap_content"
             android:layout_height="56dp"
@@ -39,6 +55,7 @@
             android:paddingStart="24dp"
             android:paddingEnd="24dp"
             android:layout_marginEnd="12dp"
+            android:nextFocusLeft="@id/btn_refresh_thumbs"
             android:nextFocusRight="@id/btn_settings"
             android:nextFocusDown="@id/recycler_channels" />
 

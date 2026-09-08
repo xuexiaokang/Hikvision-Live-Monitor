@@ -78,6 +78,24 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
                 }
             });
         }
+
+        // ===== 刷新缩略图按钮（预热：自动 9 宫格轮播 + 逐路截帧后自动回列表）=====
+        Button btnRefreshThumbs = findViewById(R.id.btn_refresh_thumbs);
+        if (btnRefreshThumbs != null) {
+            btnRefreshThumbs.setOnClickListener(v -> {
+                Log.i("MainActivity", "点击刷新缩略图 → 启动自动预热多画面");
+                Intent intent = new Intent(this, MultiViewActivity.class);
+                intent.putExtra(MultiViewActivity.EXTRA_AUTOCAPTURE, true);
+                startActivity(intent);
+            });
+            btnRefreshThumbs.setOnFocusChangeListener((v, hasFocus) -> {
+                if (hasFocus) {
+                    v.setBackgroundResource(R.drawable.channel_card_focused);
+                } else {
+                    v.setBackgroundResource(R.drawable.channel_card_normal);
+                }
+            });
+        }
     }
 
     @Override
