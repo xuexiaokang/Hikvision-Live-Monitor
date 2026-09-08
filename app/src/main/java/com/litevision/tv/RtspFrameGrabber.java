@@ -2,9 +2,14 @@ package com.litevision.tv;
 
 import android.content.Context;
 import android.graphics.Bitmap;
+import android.graphics.ImageFormat;
+import android.graphics.PixelFormat;
 import android.graphics.SurfaceTexture;
+import android.media.Image;
+import android.media.ImageReader;
 import android.net.Uri;
 import android.os.Handler;
+import android.os.HandlerThread;
 import android.util.Log;
 import android.view.Surface;
 import android.view.TextureView;
@@ -14,11 +19,13 @@ import org.videolan.libvlc.Media;
 import org.videolan.libvlc.MediaPlayer;
 import org.videolan.libvlc.interfaces.IVLCVout;
 
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -47,8 +54,11 @@ import java.util.concurrent.atomic.AtomicReference;
  *
  * <p>实现要点：
  * <ul>
- *   <li>抓帧 = 一个独立 {@link MediaPlayer} + 调用方提供的 TextureView + 共享 LibVLC 实例（懒加载、
- *       进程内一份）；TextureView 是多画面/单画面已经验证的渲染后端，不存在 GL 上下文缺失问题；</li>
+ *   <li><b>离屏优先（2026-09 新增，默认路径）</b>：抓帧 = 一个独立 {@link MediaPlayer} +
+ *       {@link ImageReader} 提供的离屏 Surface + 共享 LibVLC 实例（懒加载、进程内一份）；
+ *       不依赖任何 View attach 到窗口，帧到达后直接从 {@link Image} 取像素转 Bitmap；</li>
+ *   <li><b>TV 回退（旧路径，保底）</b>：离屏拿不到帧时退回"调用方提供的 TextureView"路径
+ *       （多画面/单画面已验证的渲染后端），保证抓图能力不归零；</li>
  *   <li>取流参数统一取自 {@link VlcOptions}（与 {@link PlayerEngine}、{@link MultiViewActivity}
  *       同源的单一事实源，避免各处漏改导致行为漂移）；本类 decodeSpeedup=false 以保缩略图画质；</li>
  *   <li>整个抓帧过程（创建/play/stop/release）全在后台线程完成；stop 与 release 之间留 120ms 间隔，
@@ -70,6 +80,16 @@ public final class RtspFrameGrabber {
     /** 首帧到达后的稳定等待（毫秒）：首帧偶发纯黑/尚未完全解码，多等一小会儿再 getBitmap 更可信。 */
     private static final long SETTLE_DELAY_MS = 400L;
 
+    /**
+     * 离屏取帧：至少收到几帧才收图。
+     * 前 1 帧常常尚未完全解码或偏黑，多等一帧再取，画质更可信；
+     * 若流只吐出 1 帧就停，超时后会用 frameRef 里那帧兜底（不会白等）。
+     */
+    private static final int OFFSCREEN_MIN_FRAMES = 2;
+
+    /** 主线程 attachViews/play 的等待上限（毫秒）：只是防止主线程卡死时后台线程永久挂起。 */
+    private static final long ATTACH_TIMEOUT_MS = 1000L;
+
     /** stop() 与 release() 之间的间隔：VLC 的 stop 是异步派发，留一拍再释放防死锁。 */
     private static final long STOP_RELEASE_GAP_MS = 120L;
 
@@ -84,6 +104,14 @@ public final class RtspFrameGrabber {
     private volatile boolean libVlcFailed = false;
     /** 已 shutdown：拒绝新抓帧（列表页销毁后不再连 NVR 抢并发额度）。 */
     private volatile boolean released = false;
+
+    /**
+     * 离屏取帧回调线程（懒加载）。
+     * {@link ImageReader#setOnImageAvailableListener} 必须挂在带 Looper 的线程上；
+     * 抓帧本身跑在无 Looper 的后台 executor 线程，故单独开一条。
+     */
+    private volatile HandlerThread imageThread;
+    private volatile Handler imageHandler;
 
     public RtspFrameGrabber(Context context, Handler mainHandler) {
         this.appContext = (context != null) ? context.getApplicationContext() : null;
@@ -112,6 +140,25 @@ public final class RtspFrameGrabber {
      */
     public Bitmap grab(final TextureView tv, final String rtspUrl, final String avcodecHw,
                        final long timeoutMs) {
+        return grab(tv, rtspUrl, avcodecHw, timeoutMs, -1);
+    }
+
+    /**
+     * 抓一帧（阻塞调用，必须在后台线程）。
+     *
+     * <p><b>离屏优先</b>：先走 {@link #grabOffscreen} —— 用 ImageReader 提供的 Surface 作
+     * libVLC vout 渲染目标，全程不依赖任何 View attach 到窗口。真机实测（2026-09）列表项
+     * TextureView 在 RecyclerView 里频繁 attach/detach，抓帧那一刻常常 tvAttached=false，
+     * TV 路径必失败（{@code RTSP 抓帧开始 ... tvAttached=false tvAvailable=false}）；
+     * 离屏路径不受此影响。
+     *
+     * <p><b>失败回退</b>：离屏拿不到帧时退回原 TV 路径（保底，不让抓图能力归零）。
+     * 当 tv 为空或当前已失效时，TV 路径会立刻返回，几乎不额外耗时。
+     *
+     * @param channelIndex 仅用于日志（便于按通道排查）；-1 表示未知
+     */
+    public Bitmap grab(final TextureView tv, final String rtspUrl, final String avcodecHw,
+                       final long timeoutMs, final int channelIndex) {
         if (released) {
             Log.d(TAG, "抓帧器已释放，跳过抓帧");
             return null;
@@ -120,8 +167,16 @@ public final class RtspFrameGrabber {
             Log.w(TAG, "RTSP 地址为空，跳过抓帧");
             return null;
         }
+
+        // ===== ① 离屏抓帧（ImageReader，不依赖列表项 TextureView）=====
+        Bitmap offscreen = grabOffscreen(rtspUrl, avcodecHw, timeoutMs, channelIndex);
+        if (offscreen != null) {
+            return offscreen;
+        }
+
+        // ===== ② 离屏失败 → 回退原 TextureView 路径 =====
         if (tv == null) {
-            Log.w(TAG, "TextureView 为空，跳过抓帧");
+            Log.w(TAG, "离屏抓帧失败且 TextureView 为空，放弃 ch" + channelIndex);
             return null;
         }
         // 严格校验：TV 必须 attached + available + 有 SurfaceTexture，三者任一不满足直接放弃。
@@ -311,6 +366,275 @@ public final class RtspFrameGrabber {
     }
 
     /**
+     * 离屏抓帧：用 {@link ImageReader} 提供的 Surface 作为 libVLC vout 的渲染目标，
+     * 帧到达后直接从 {@link Image} 取像素转 Bitmap —— 全程不需要任何 View attach 到窗口。
+     *
+     * <p><b>为什么需要它</b>：列表项 TextureView（原路径）在 RecyclerView 里频繁
+     * attach/detach，真机实测抓帧那一刻 {@code tvAttached=false / tvAvailable=false}，
+     * 抓帧必失败；而 ThumbnailLoader 里"发起时 TV 就绪"的检查（waitTvAndStartGrab）
+     * 无法保证抓帧期间 TV 一直有效。
+     *
+     * <p><b>格式选择（2026-09 真机结论）</b>：请求 {@link ImageFormat#YUV_420_888} ——
+     * 视频产流端普遍支持的格式，转 Bitmap 走手写 BT.601 满量程转换（零额外依赖）。
+     * 曾用 {@link PixelFormat#RGBA_8888}，真机 9 路全部 frames=0（vout 一帧都没渲进
+     * BufferQueue），故改走 YUV；若产流端实际给的是 RGBA，{@link #imageToBitmap} 的
+     * 默认分支 {@link #rgbaToBitmap} 仍会自动接管。两处格式只是这一行常量，可单点切换。
+     *
+     * @return 抓到的帧；失败/超时返回 null（不抛异常）
+     */
+    public Bitmap grabOffscreen(final String rtspUrl, final String avcodecHw,
+                                final long timeoutMs, final int channelIndex) {
+        if (released) {
+            return null;
+        }
+        final LibVLC lib = ensureLibVlc(avcodecHw);
+        if (lib == null) {
+            Log.w(TAG, "离屏抓帧失败 ch" + channelIndex + " 原因=LibVLC 不可用");
+            return null;
+        }
+        final Handler frameHandler = ensureImageHandler();
+        if (frameHandler == null) {
+            Log.w(TAG, "离屏抓帧失败 ch" + channelIndex + " 原因=取帧回调线程不可用");
+            return null;
+        }
+
+        final long t0 = System.currentTimeMillis();
+        ImageReader reader = null;
+        MediaPlayer mediaPlayer = null;
+        Bitmap bitmap = null;
+        String failReason = "unknown";
+        try {
+            // 格式：YUV_420_888。
+            // RGBA_8888 经真机验证（2026-09 MuMu）9 路全部 frames=0 —— vout 一帧都没渲进
+            // BufferQueue，说明产流端不接受 RGBA_8888 的 BufferQueue 几何。
+            // YUV_420_888 是视频产流端普遍支持的格式，改这里即可单点切换回退。
+            reader = ImageReader.newInstance(FRAME_WIDTH, FRAME_HEIGHT, ImageFormat.YUV_420_888, 3);
+            final ImageReader finalReader = reader;
+            final CountDownLatch frameLatch = new CountDownLatch(1);
+            final AtomicReference<Bitmap> frameRef = new AtomicReference<>();
+            final AtomicBoolean counted = new AtomicBoolean(false);
+            final AtomicInteger frameCount = new AtomicInteger(0);
+
+            finalReader.setOnImageAvailableListener(new ImageReader.OnImageAvailableListener() {
+                @Override
+                public void onImageAvailable(ImageReader r) {
+                    Image image = null;
+                    try {
+                        image = r.acquireLatestImage();
+                        if (image == null) {
+                            return;
+                        }
+                        Bitmap b = imageToBitmap(image);
+                        if (b != null) {
+                            // 只保留最新一帧（旧帧会被后续覆盖）
+                            frameRef.set(b);
+                        }
+                    } catch (Throwable t) {
+                        Log.w(TAG, "离屏取帧异常: " + t.getMessage());
+                    } finally {
+                        if (image != null) {
+                            try { image.close(); } catch (Throwable ignored) {}
+                        }
+                        // 前几帧可能尚未完全解码/偏黑，攒够 OFFSCREEN_MIN_FRAMES 再收图
+                        if (frameCount.incrementAndGet() >= OFFSCREEN_MIN_FRAMES
+                                && counted.compareAndSet(false, true)) {
+                            frameLatch.countDown();
+                        }
+                    }
+                }
+            }, frameHandler);
+
+            mediaPlayer = new MediaPlayer(lib);
+            mediaPlayer.setEventListener(event -> {
+                if (event.type == MediaPlayer.Event.EncounteredError) {
+                    Log.w(TAG, "离屏抓帧 VLC EncounteredError ch" + channelIndex
+                            + " url=" + maskUrl(rtspUrl));
+                }
+            });
+
+            Media mediaEarly = new Media(lib, Uri.parse(rtspUrl));
+            applyMediaOptions(mediaEarly, avcodecHw);
+            mediaPlayer.setMedia(mediaEarly);
+            mediaEarly.release();
+
+            // libVLC 的 IVLCVout 操作必须在主线程（与原 TV 路径、多画面 ChannelTileView 同源）
+            final Surface frameSurface = finalReader.getSurface();
+            final MediaPlayer mpForMain = mediaPlayer;
+            final CountDownLatch attachLatch = new CountDownLatch(1);
+            mainHandler.post(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        final IVLCVout vout = mpForMain.getVLCVout();
+                        vout.setVideoSurface(frameSurface, null);
+                        vout.setWindowSize(FRAME_WIDTH, FRAME_HEIGHT);
+                        vout.attachViews();
+                        // 诊断：区分"vout 压根没 attach 上"和"attach 了但产流端不出帧"。
+                        // frames=0 + areViewsAttached=false → vout 创建/绑定失败（该换 vout 参数）；
+                        // frames=0 + areViewsAttached=true  → vout 正常但没人往 Surface 写帧。
+                        final boolean attached = vout.areViewsAttached();
+                        mpForMain.play();
+                        Log.i(TAG, "离屏 vout attach 结果 ch" + channelIndex
+                                + " areViewsAttached=" + attached
+                                + " surfaceNonNull=" + (frameSurface != null)
+                                + " size=" + FRAME_WIDTH + "x" + FRAME_HEIGHT
+                                + " format=YUV_420_888");
+                    } catch (Throwable t) {
+                        Log.e(TAG, "离屏 attachViews/play 异常 ch" + channelIndex
+                                + ": " + t.getMessage());
+                        frameLatch.countDown();
+                    } finally {
+                        attachLatch.countDown();
+                    }
+                }
+            });
+            try {
+                attachLatch.await(ATTACH_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+            }
+
+            boolean arrived = false;
+            try {
+                arrived = frameLatch.await(timeoutMs, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+            }
+            if (!arrived) {
+                failReason = "timeout(frames=" + frameCount.get() + ")";
+            }
+            // 超时但已攒到部分帧时，用 frameRef 里最新那帧兜底（不白等一整轮）
+            bitmap = frameRef.get();
+            if (bitmap == null) {
+                failReason = arrived ? "frame-null" : failReason;
+            }
+        } catch (Throwable t) {
+            failReason = "exception:" + t.getMessage();
+            Log.e(TAG, "离屏抓帧异常: " + t.getMessage(), t);
+        } finally {
+            if (mediaPlayer != null) {
+                try { mediaPlayer.stop(); } catch (Throwable ignored) {}
+                try { mediaPlayer.getVLCVout().detachViews(); } catch (Throwable ignored) {}
+                try { Thread.sleep(STOP_RELEASE_GAP_MS); } catch (Throwable ignored) {}
+                try { mediaPlayer.release(); } catch (Throwable ignored) {}
+            }
+            if (reader != null) {
+                try { reader.setOnImageAvailableListener(null, null); } catch (Throwable ignored) {}
+                // reader.close() 同时释放它 own 的 Surface（不要再单独 surface.release()）
+                try { reader.close(); } catch (Throwable ignored) {}
+            }
+            final long cost = System.currentTimeMillis() - t0;
+            if (bitmap != null) {
+                Log.i(TAG, "离屏抓帧成功 ch" + channelIndex + " 耗时=" + cost + "ms "
+                        + bitmap.getWidth() + "x" + bitmap.getHeight()
+                        + " url=" + maskUrl(rtspUrl));
+            } else {
+                Log.w(TAG, "离屏抓帧失败 ch" + channelIndex + " 原因=" + failReason
+                        + " 耗时=" + cost + "ms");
+            }
+        }
+        return bitmap;
+    }
+
+    /**
+     * 把 {@link ImageReader} 拿到的 {@link Image} 转成 Bitmap。
+     *
+     * <p>按 {@code image.getFormat()} 分派：YUV_420_888 走手动 YUV→RGB；
+     * 其余（RGBA_8888 / FLEX_RGBA_8888）直接按行取 int 像素。
+     */
+    private static Bitmap imageToBitmap(Image image) {
+        if (image == null) {
+            return null;
+        }
+        if (image.getFormat() == ImageFormat.YUV_420_888) {
+            return yuv420ToBitmap(image);
+        }
+        return rgbaToBitmap(image);
+    }
+
+    /**
+     * RGBA_8888 → ARGB_8888 Bitmap。
+     *
+     * <p>{@link Image} 的像素在内存里是 R,G,B,A 字节序；小端读成 int 是 0xAABBGGRR，
+     * 而 Bitmap 需要 0xAARRGGBB，故做一次 R/B 通道交换。
+     */
+    private static Bitmap rgbaToBitmap(Image image) {
+        final int width = image.getWidth();
+        final int height = image.getHeight();
+        if (width <= 0 || height <= 0) {
+            return null;
+        }
+        final Image.Plane plane = image.getPlanes()[0];
+        final ByteBuffer buffer = plane.getBuffer();
+        final int pixelStride = plane.getPixelStride();
+        final int rowStride = plane.getRowStride();
+        if (pixelStride != 4) {
+            Log.w(TAG, "RGBA 取帧 pixelStride=" + pixelStride + " 非 4，仍按 4 字节解析");
+        }
+        final int[] pixels = new int[width * height];
+        int rowOffset = 0;
+        for (int y = 0; y < height; y++) {
+            int offset = rowOffset;
+            final int dstRow = y * width;
+            for (int x = 0; x < width; x++) {
+                final int v = buffer.getInt(offset);
+                pixels[dstRow + x] = (v & 0xFF000000)
+                        | ((v & 0x000000FF) << 16)
+                        | (v & 0x0000FF00)
+                        | ((v & 0x00FF0000) >> 16);
+                offset += pixelStride;
+            }
+            rowOffset += rowStride;
+        }
+        return Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888);
+    }
+
+    /**
+     * YUV_420_888 → ARGB_8888 Bitmap（手动转换，不引入 RenderScript 依赖）。
+     *
+     * <p>标准 BT.601 满量程转换；640×360 量级在本方法的耗时是毫秒级，可接受。
+     */
+    private static Bitmap yuv420ToBitmap(Image image) {
+        final int width = image.getWidth();
+        final int height = image.getHeight();
+        if (width <= 0 || height <= 0) {
+            return null;
+        }
+        final Image.Plane[] planes = image.getPlanes();
+        final ByteBuffer yBuf = planes[0].getBuffer();
+        final ByteBuffer uBuf = planes[1].getBuffer();
+        final ByteBuffer vBuf = planes[2].getBuffer();
+        final int yRowStride = planes[0].getRowStride();
+        final int yPixelStride = planes[0].getPixelStride();
+        final int uRowStride = planes[1].getRowStride();
+        final int uPixelStride = planes[1].getPixelStride();
+        final int vRowStride = planes[2].getRowStride();
+        final int vPixelStride = planes[2].getPixelStride();
+
+        final int[] pixels = new int[width * height];
+        for (int y = 0; y < height; y++) {
+            final int yRowOffset = y * yRowStride;
+            final int uvRowOffset = (y >> 1);
+            final int uRow = uvRowOffset * uRowStride;
+            final int vRow = uvRowOffset * vRowStride;
+            final int dstRow = y * width;
+            for (int x = 0; x < width; x++) {
+                final int yVal = (yBuf.get(yRowOffset + x * yPixelStride) & 0xFF) - 16;
+                final int uVal = (uBuf.get(uRow + (x >> 1) * uPixelStride) & 0xFF) - 128;
+                final int vVal = (vBuf.get(vRow + (x >> 1) * vPixelStride) & 0xFF) - 128;
+                int r = (int) (1.164f * yVal + 1.596f * vVal);
+                int g = (int) (1.164f * yVal - 0.392f * uVal - 0.813f * vVal);
+                int b = (int) (1.164f * yVal + 2.017f * uVal);
+                if (r < 0) r = 0; else if (r > 255) r = 255;
+                if (g < 0) g = 0; else if (g > 255) g = 255;
+                if (b < 0) b = 0; else if (b > 255) b = 255;
+                pixels[dstRow + x] = 0xFF000000 | (r << 16) | (g << 8) | b;
+            }
+        }
+        return Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888);
+    }
+
+    /**
      * 抓帧用临时 STListener：仅在首帧到达时回调一次（latch.countDown），后续帧不影响。
      * 单独抽出来作为内部类，是因为 TextureView.SurfaceTextureListener 是 interface，
      * 内嵌 Runnable 里 new 会反复创建 listener 对象，效率低且容易 leak。
@@ -376,6 +700,37 @@ public final class RtspFrameGrabber {
                 Log.w(TAG, "LibVLC release 错误: " + t.getMessage());
             }
         }
+        synchronized (this) {
+            if (imageThread != null) {
+                try { imageThread.quitSafely(); } catch (Throwable ignored) {}
+                imageThread = null;
+                imageHandler = null;
+            }
+        }
+    }
+
+    /**
+     * 离屏取帧回调线程（懒加载）：ImageReader 的 onImageAvailable 必须挂在带 Looper 的线程上，
+     * 而抓帧本身跑在无 Looper 的后台 executor 线程上，故单独开一条守护线程。
+     */
+    private synchronized Handler ensureImageHandler() {
+        if (imageHandler != null) {
+            return imageHandler;
+        }
+        if (released || imageThread != null) {
+            return imageHandler;
+        }
+        try {
+            final HandlerThread t = new HandlerThread("thumb-frame-io");
+            t.setDaemon(true);
+            t.start();
+            imageThread = t;
+            imageHandler = new Handler(t.getLooper());
+        } catch (Throwable t) {
+            Log.w(TAG, "取帧回调线程创建失败: " + t.getMessage());
+            return null;
+        }
+        return imageHandler;
     }
 
     // ===== libVLC 实例（懒加载、进程内共享一份）=====

@@ -126,6 +126,21 @@ public final class ThumbnailCache {
      */
     public static void loadInto(final Context ctx, final int channelIndex,
                                  final android.widget.ImageView targetIv, final String key) {
+        loadInto(ctx, channelIndex, targetIv, key, null);
+    }
+
+    /**
+     * 带解码回调的异步读盘，供 {@link ThumbnailLoader} 把解码结果缓存复用（消除异步空白窗口）。
+     *
+     * <p>与三参版唯一的语义差别：<b>传了 callback 时，Bitmap 生命周期移交给调用方</b> ——
+     * 本方法不再在 tag 不匹配时 {@code recycle()}，因为调用方要缓存它供后续 bind 复用。
+     * 不传 callback（即走三参版）时行为与改造前完全一致。</p>
+     *
+     * @param callback 解码完成回调（主线程派发；bitmap 为 null 表示解码失败）。可 null。
+     */
+    public static void loadInto(final Context ctx, final int channelIndex,
+                                 final android.widget.ImageView targetIv, final String key,
+                                 final LoadCallback callback) {
         ensureIo(ctx);
         final File f = getFile(ctx, channelIndex);
         if (!f.exists() || f.length() == 0 || targetIv == null) {
@@ -143,15 +158,26 @@ public final class ThumbnailCache {
             }
             final Bitmap finalBm = bm;
             mainHandler.post(() -> {
-                if (finalBm == null || targetIv.getTag() == null
-                        || !key.equals(targetIv.getTag().toString())) {
-                    // 格子已 RV 复用 / 已置空 tag → 丢弃，自己回收避免泄漏
-                    if (finalBm != null) finalBm.recycle();
-                    return;
+                boolean tagOk = finalBm != null && targetIv.getTag() != null
+                        && key.equals(targetIv.getTag().toString());
+                if (tagOk) {
+                    targetIv.setImageBitmap(finalBm);
                 }
-                targetIv.setImageBitmap(finalBm);
+                if (callback != null) {
+                    // 生命周期移交调用方：即使 tag 不匹配也回传 —— Bitmap 属于该 channelIndex，
+                    // 下次绑到任意格子都能直接用
+                    callback.onDecoded(finalBm);
+                } else if (!tagOk && finalBm != null) {
+                    // 无回调（旧行为）：格子已复用且无人接管 → 自己回收避免泄漏
+                    finalBm.recycle();
+                }
             });
         });
+    }
+
+    /** 解码完成回调（主线程派发）。 */
+    public interface LoadCallback {
+        void onDecoded(Bitmap bitmap);
     }
 
     /** 等比例缩放到不超过 maxW × maxH 的范围（保持纵横比）。 */

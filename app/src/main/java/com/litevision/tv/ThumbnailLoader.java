@@ -39,27 +39,34 @@ public class ThumbnailLoader {
     /** HTTP 抓图线程数（NvrClient 内部已串行化，无需更多）。 */
     private static final int MAX_THREADS = 2;
     /**
-     * RTSP 抓帧并发上限：4。
-     * 与 HTTP 抓图分开独立线程池，避免慢速抓帧把 HTTP 快通道堵死；
-     * 4 路并发下 9 格分 3 批完成（最多 3 路同时在跑），实测 NVR 默认并发上限通常 ≥ 8，
-     * 即便缩到 4 也不会和"用户在多画面正在播放的 N 路 RTSP"形成恶性竞争。
+     * RTSP 抓帧并发上限：2。
+     * 与 HTTP 抓图分开独立线程池，避免慢速抓帧把 HTTP 快通道堵死。
+     *
+     * <p>为什么从 4 降到 2：{@link #onSuccess} 已改为"抓到即落盘"（写
+     * {@code thumbnails/chXX.jpg}），同一通道第二次进入列表直接走磁盘分支，
+     * 真正需要抓帧的只剩"从未出过图"的通道，抓取量级大幅下降 —— 此时降并发
+     * 换取对"用户正在多画面播放的 N 路 RTSP"更小的干扰，性价比更高。
      *
      * <p>调试结论（2026-09-06）：本值与 libVLC vout "BufferQueue abandoned" 现象无关——
      * 串行（MAX_RTSP_THREADS=1）单路抓帧同样报 `request 1 not implemented`，属模拟器层
-     * ST 兼容性问题，改并发不解决问题；保留 4 路并行。
+     * ST 兼容性问题，改并发不解决问题。
      */
-    private static final int MAX_RTSP_THREADS = 4;
+    private static final int MAX_RTSP_THREADS = 2;
 
     /**
      * RTSP 抓帧超时（毫秒）。
      * 主码流码率高但 I 帧出现快（1-3s 拿图），给 4s；子码流可能被 NVR 转码延迟拖慢，给 4s。
-     * 两轮加起来最多 8s，确保 9 路 4 并发也能在合理时间内出图。
+     * 两轮加起来最多 8s，确保 9 路在 {@link #MAX_RTSP_THREADS}=2 并发下（分 5 批）
+     * 仍能在合理时间内出图。
      */
     private static final long RTSP_MAIN_TIMEOUT_MS = 4000L;
     private static final long RTSP_SUB_TIMEOUT_MS = 4000L;
 
-    /** 失败后多久才允许下一次自动重试（毫秒）。 */
+    /** 自动重试的基础退避时长（毫秒）；实际等待按 {@link #retryDelayFor} 指数增长。 */
     private static final long RETRY_INTERVAL_MS = 4000L;
+
+    /** 自动重试退避上限（毫秒）：4s → 8s → 16s → 32s → 60s 封顶。 */
+    private static final long MAX_RETRY_INTERVAL_MS = 60000L;
 
     /** 同一 key 的自动重试上限；达到后不再自动重试（配置变更/列表刷新会清零）。 */
     private static final int MAX_AUTO_RETRY = 5;
@@ -77,6 +84,19 @@ public class ThumbnailLoader {
     private final ExecutorService rtspExecutor;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Map<String, Bitmap> cache = new ConcurrentHashMap<>();
+    /**
+     * 磁盘缩略图（{@code getFilesDir()/thumbnails/chXX.jpg}）的解码结果内存缓存，按 channelIndex 存。
+     *
+     * <p><b>为什么必须独立于 {@link #cache}</b>：{@link #cache} 以 {@code host:port_ch} 为键，
+     * 且会被 {@link #refresh()} / {@link #setConfig()} 的 {@code cache.clear()} 清空；
+     * 而磁盘 jpg 的解码结果与 host/port 无关，跟着一起清掉只会导致每次刷新都要重新异步解码。
+     *
+     * <p><b>为什么必须存在</b>：{@link ThumbnailCache#loadInto} 是异步的（IO 线程 decodeFile
+     * → post 回主线程 setImageBitmap），在解码完成前格子是"VISIBLE 但无内容"状态，
+     * 会露出外层 FrameLayout 的 #000000 黑底 —— 这正是用户看到的"缩略图丢失/黑块"。
+     * 缓存解码结果后，同一个通道再次 bind 直接同步 setImageBitmap，零空白窗口。
+     */
+    private final Map<Integer, Bitmap> diskBitmapCache = new ConcurrentHashMap<>();
     /** 应用上下文（getFilesDir 用于本地缩略图缓存）。 */
     private final Context appContext;
     /** 在途抓图去重：re-bind 会重复触发 load()，同 key 并发只抓一次 */
@@ -267,7 +287,15 @@ public class ThumbnailLoader {
         // 缓存键带上 ISAPI 端口：端口变化后不应命中旧图
         String key = config.getConnectionHost() + ":" + config.getEffectiveHttpPort() + "_" + channelIndex;
 
-        // Check cache
+        // 复用格子换了通道：当前图属于别的通道，先贴占位图。
+        // 不处理会短暂串图；只清空不贴图又会露出下层黑底，所以必须"清 + 贴"一起做。
+        if (imageView.getDrawable() != null && !key.equals(String.valueOf(imageView.getTag()))) {
+            imageView.setImageResource(R.drawable.thumbnail_placeholder);
+        }
+
+        // ===== 取图优先级（硬约束：命中 1/2/3 任意一个都绝不允许发起网络抓取）=====
+
+        // 1) 内存 cache（本次会话内已抓到 / 已解码）
         Bitmap cached = cache.get(key);
         if (cached != null) {
             imageView.setVisibility(View.VISIBLE);
@@ -275,23 +303,83 @@ public class ThumbnailLoader {
             return;
         }
 
-        // ===== ★ 优先读取本地缓存（来自 PlayerActivity/MultiViewActivity 播放时截屏）=====
-        // 用户实际打开过该通道后，会把当时播放画面截成 jpg 写到 getFilesDir()/thumbnails/chXX.jpg。
-        // 列表页下次再显示时直接读这个 jpg，秒出图，且画面是用户实际看过的真实帧。
-        // 命中即返回，不再触发 HTTP/RTSP 抓帧（节省 NVR 并发额度）。
-        if (appContext != null && ThumbnailCache.hasCached(appContext, channelIndex)) {
+        // 2) 磁盘图已解码结果 → 同步立即显示，零延迟、零网络
+        Bitmap decodedDisk = diskBitmapCache.get(channelIndex);
+        if (decodedDisk != null && !decodedDisk.isRecycled()) {
             imageView.setVisibility(View.VISIBLE);
             imageView.setTag(key);
-            ThumbnailCache.loadInto(appContext, channelIndex, imageView, key);
+            imageView.setImageBitmap(decodedDisk);
             return;
         }
 
+        // 3) 磁盘有 jpg（播放时截帧 或 onSuccess 抓到即落盘）但本次会话尚未解码
+        //    → 异步解码并回写 diskBitmapCache；命中即返回，绝不触发 HTTP/RTSP 抓帧。
+        if (appContext != null && ThumbnailCache.hasCached(appContext, channelIndex)) {
+            imageView.setVisibility(View.VISIBLE);
+            imageView.setTag(key);
+            showDiskOrPlaceholder(imageView, channelIndex, key);
+            return;
+        }
+
+        // 4) 三者都没有 → 才发起 HTTP/RTSP 抓取（这是唯一会产生网络请求的分支）
         // Clear and mark
         imageView.setVisibility(View.VISIBLE);
         imageView.setImageResource(R.drawable.thumbnail_placeholder);
         imageView.setTag(key);
 
         loadAsync(imageView, tv, channelIndex, key);
+    }
+
+    /**
+     * 尽最大努力让格子<b>立刻就有图</b>，绝不留"VISIBLE 但无内容"的空白窗口
+     * （那会露出外层 FrameLayout 的 #000000 黑底，即用户投诉的黑块）：
+     * <ol>
+     *   <li>该通道的磁盘图已经解码过 → 同步 {@code setImageBitmap}，零延迟、零闪烁；</li>
+     *   <li>否则 → 先保证有占位图兜底，再异步解码（解码结果会回写 {@link #diskBitmapCache}）。</li>
+     * </ol>
+     *
+     * <p>调用前必须已设置 {@code imageView.setTag(key)}，异步分支靠 tag 校验防 RV 错位。
+     */
+    private void showDiskOrPlaceholder(ImageView imageView, int channelIndex, String key) {
+        imageView.setVisibility(View.VISIBLE);
+        Bitmap diskBm = diskBitmapCache.get(channelIndex);
+        if (diskBm != null && !diskBm.isRecycled()) {
+            imageView.setImageBitmap(diskBm);
+            return;
+        }
+        if (imageView.getDrawable() == null) {
+            imageView.setImageResource(R.drawable.thumbnail_placeholder);
+        }
+        loadDiskInto(imageView, channelIndex, key);
+    }
+
+    /**
+     * 读取磁盘缩略图（{@code chXX.jpg}）回填到格子，并把解码结果写进 {@link #diskBitmapCache}，
+     * 使该通道之后的每次 bind 都能同步立即出图。
+     *
+     * <p>tag 校验失败（格子已被 RV 复用给别的通道）时<b>仍然缓存</b>该 Bitmap —— 它属于这个
+     * channelIndex，下次绑到任意格子都能直接用；只是不回填当前 IV，避免串图。
+     */
+    private void loadDiskInto(ImageView imageView, int channelIndex, String key) {
+        if (appContext == null) {
+            return;
+        }
+        ThumbnailCache.loadInto(appContext, channelIndex, imageView, key, bm -> {
+            if (bm != null && !bm.isRecycled()) {
+                diskBitmapCache.put(channelIndex, bm);
+                return;
+            }
+            if (bm == null) {
+                // 解码失败 = jpg 存在但已损坏。必须删掉坏文件，否则 hasCached() 永远返回 true，
+                // load() 永远停在第 3 级（不发起网络、也永远没图），格子永久停在 placeholder，
+                // 正是用户投诉的"缩略图不显示"。删掉后下次 bind 自然回落到第 4 级重抓 → 自愈。
+                // 注意只在确实解码失败时删，bm != null 的正常流程行为完全不变。
+                diskBitmapCache.remove(channelIndex);
+                boolean deleted = ThumbnailCache.getFile(appContext, channelIndex).delete();
+                Log.w(TAG, "删除损坏缩略图 ch" + channelIndex + " deleted=" + deleted
+                        + "（下次 bind 将回落到网络重抓）");
+            }
+        });
     }
 
     /**
@@ -353,7 +441,7 @@ public class ThumbnailLoader {
                     Log.w(TAG, "HTTP 抓图异常: " + t.getMessage());
                 }
                 if (bitmap != null) {
-                    onSuccess(key, bitmap);
+                    onSuccess(key, bitmap, channelIndex);
                     return;
                 }
                 Log.i(TAG, "HTTP 抓图未出图 ch" + channelIndex + "，回退 RTSP 抓帧");
@@ -362,7 +450,7 @@ public class ThumbnailLoader {
                     try {
                         Bitmap frame = fetchRtspFrame(tv, channelIndex);
                         if (frame != null) {
-                            onSuccess(key, frame);
+                            onSuccess(key, frame, channelIndex);
                         } else {
                             onFailure(key, channelIndex);
                         }
@@ -385,11 +473,18 @@ public class ThumbnailLoader {
         });
     }
 
-    /** 成功：进缓存 + 回填所有登记在该 key 上的格子（tag 校验防 RecyclerView 复用错位）。 */
-    private void onSuccess(String key, Bitmap bitmap) {
+    /**
+     * 成功：进内存缓存 + <b>落盘</b> + 回填所有登记在该 key 上的格子（tag 校验防 RecyclerView 复用错位）。
+     *
+     * <p>落盘是"抓一次永久复用"的关键：写进 {@code thumbnails/chXX.jpg} 之后，
+     * 即便 refresh()/setConfig()/冷启动清空了内存 {@link #cache}，列表页也能走磁盘分支秒出
+     * 历史图，不再把 9 路全部重抓一遍。
+     */
+    private void onSuccess(String key, Bitmap bitmap, int channelIndex) {
         synchronized (cache) {
             cache.put(key, bitmap);
         }
+        persistToDisk(channelIndex, bitmap);
         failCount.remove(key);
         nextRetryAt.remove(key);
         final Set<ImageView> targets = pendingViews.remove(key);
@@ -411,7 +506,22 @@ public class ThumbnailLoader {
         });
     }
 
-    /** 失败：累计次数 + 10s 冷却 + 排期一次自动重试；达到上限后停止自动重试（防无限打 NVR）。 */
+    /**
+     * 抓到即落盘：写 {@code getFilesDir()/thumbnails/chXX.jpg}。
+     *
+     * <p>{@link ThumbnailCache#save} 内部走后台 IO 线程并自动缩放到 480×270 压缩，
+     * 不阻塞主线程也不占空间。同时把 Bitmap 同步写进 {@link #diskBitmapCache} ——
+     * save() 是异步的，diskBitmapCache 让"刚抓到"的图在同一次会话内立刻就能同步出图。
+     */
+    private void persistToDisk(int channelIndex, Bitmap bitmap) {
+        if (appContext == null || bitmap == null || bitmap.isRecycled()) {
+            return;
+        }
+        diskBitmapCache.put(channelIndex, bitmap);
+        ThumbnailCache.save(appContext, channelIndex, bitmap, null);
+    }
+
+    /** 失败：指数退避冷却 + 排期一次自动重试；有历史图或达上限则不再自动重试（防无限打 NVR）。 */
     private void onFailure(String key, int channelIndex) {
         if (stopped) {
             return;
@@ -419,15 +529,23 @@ public class ThumbnailLoader {
         int count = failCount.containsKey(key) ? failCount.get(key) : 0;
         count++;
         failCount.put(key, count);
-        nextRetryAt.put(key, System.currentTimeMillis() + RETRY_INTERVAL_MS);
+        final long delayMs = retryDelayFor(count);
+        nextRetryAt.put(key, System.currentTimeMillis() + delayMs);
         if (count >= MAX_AUTO_RETRY) {
             pendingViews.remove(key);
             Log.w(TAG, "缩略图放弃自动重试 ch" + channelIndex + " key=" + key
                     + "（已失败 " + count + " 次，HTTP 与 RTSP 均未出图）");
             return;
         }
+        // 已有历史图（磁盘 jpg 或本次会话已解码的 Bitmap）→ 不再自动重试。
+        // 有图可显示就够了，绝不为了"刷新得更清晰"而反复打 NVR（硬约束：有历史图不打网络）。
+        if (hasHistory(channelIndex)) {
+            Log.i(TAG, "已有历史缩略图 ch" + channelIndex
+                    + "，停止自动重试（不为了刷新而占用 NVR 并发额度）");
+            return;
+        }
         Log.w(TAG, "缩略图获取失败 ch" + channelIndex + " key=" + key
-                + "（第 " + count + " 次，" + (RETRY_INTERVAL_MS / 1000) + "s 后自动重试）");
+                + "（第 " + count + " 次，" + (delayMs / 1000) + "s 后自动重试）");
         // 自动重试：仅重试 HTTP ISAPI 一次（RTSP 主+子码流均已失败过，再试 RTSP 没意义，
         // 且 retry 路径没有 TextureView reference——TextureView 由 ChannelAdapter 在 onBindViewHolder
         // 时按需传入，retry 时旧 ViewHolder 可能已被 RecyclerView 复用/销毁，抓帧目标已不可靠）。
@@ -445,7 +563,7 @@ public class ThumbnailLoader {
                     Bitmap b = null;
                     try { b = fetchSnapshot(channelIndex, key); } catch (Throwable ignored) {}
                     if (b != null) {
-                        onSuccess(key, b);
+                        onSuccess(key, b, channelIndex);
                     } else {
                         // HTTP 仍失败，不进 RTSP：触发一次失败计数让 onFailure 把占位符盖在所有 pending 视图上。
                         // 注意：不递归加 failCount（会达到 MAX_AUTO_RETRY 阈值后停止）。
@@ -457,8 +575,7 @@ public class ThumbnailLoader {
                                     if (key.equals(view.getTag())) {
                                         // ★ 显出来 + 贴 placeholder：兜底永远不让用户看到纯黑矩形
                                         if (appContext != null && ThumbnailCache.hasCached(appContext, channelIndex)) {
-                                            view.setVisibility(View.VISIBLE);
-                                            ThumbnailCache.loadInto(appContext, channelIndex, view, key);
+                                            showDiskOrPlaceholder(view, channelIndex, key);
                                         } else {
                                             view.setVisibility(View.VISIBLE);
                                             view.setImageResource(R.drawable.thumbnail_placeholder);
@@ -472,7 +589,33 @@ public class ThumbnailLoader {
                     inFlight.remove(key);
                 }
             });
-        }, RETRY_INTERVAL_MS);
+        }, delayMs);
+    }
+
+    /**
+     * 该通道是否已有历史缩略图（磁盘 jpg，或本次会话已解码的 Bitmap）。
+     * 有历史图时不再为"刷新"发起任何网络抓取。
+     */
+    private boolean hasHistory(int channelIndex) {
+        Bitmap bm = diskBitmapCache.get(channelIndex);
+        if (bm != null && !bm.isRecycled()) {
+            return true;
+        }
+        return appContext != null && ThumbnailCache.hasCached(appContext, channelIndex);
+    }
+
+    /**
+     * 第 {@code failCount} 次失败后的自动重试等待时长：指数退避 4s → 8s → 16s → 32s，封顶 60s。
+     *
+     * <p>原来固定 4s 会让一个失败通道在 20 秒内连打 NVR 5 次；指数退避把前期压力降下来，
+     * 同时保留后续自愈机会（NVR 冷启动 / 网络抖动场景下仍能恢复）。
+     */
+    private static long retryDelayFor(int failCount) {
+        long delay = RETRY_INTERVAL_MS;
+        for (int i = 1; i < failCount && delay < MAX_RETRY_INTERVAL_MS; i++) {
+            delay <<= 1;
+        }
+        return Math.min(delay, MAX_RETRY_INTERVAL_MS);
     }
 
     /**
@@ -643,7 +786,8 @@ public class ThumbnailLoader {
                 + " tvAttached=" + tv.isAttachedToWindow()
                 + " tvAvailable=" + tv.isAvailable()
                 + " tvSt=" + (tv.getSurfaceTexture() != null));
-        Bitmap bitmap = grabber.grab(tv, mainUrl, config.getAvcodecHwValue(), RTSP_MAIN_TIMEOUT_MS);
+        Bitmap bitmap = grabber.grab(tv, mainUrl, config.getAvcodecHwValue(),
+                RTSP_MAIN_TIMEOUT_MS, channelIndex);
         if (bitmap != null) {
             Log.i(TAG, "RTSP 主码流抓帧成功 ch" + channelIndex + " 耗时=" + (System.currentTimeMillis() - start) + "ms "
                     + bitmap.getWidth() + "x" + bitmap.getHeight());
@@ -656,7 +800,8 @@ public class ThumbnailLoader {
         String subUrl = config.getRtspUrlSubStream(channelIndex);
         long startSub = System.currentTimeMillis();
         Log.i(TAG, "RTSP 抓帧开始 ch" + channelIndex + " (sub) url=" + maskUrl(subUrl));
-        bitmap = grabber.grab(tv, subUrl, config.getAvcodecHwValue(), RTSP_SUB_TIMEOUT_MS);
+        bitmap = grabber.grab(tv, subUrl, config.getAvcodecHwValue(),
+                RTSP_SUB_TIMEOUT_MS, channelIndex);
         long cost = System.currentTimeMillis() - startSub;
         if (bitmap != null) {
             Log.i(TAG, "RTSP 子码流抓帧成功 ch" + channelIndex + " 耗时=" + cost + "ms "
@@ -705,6 +850,9 @@ public class ThumbnailLoader {
         stopped = true;
         pendingViews.clear();
         inFlight.clear();
+        // 只丢弃引用、不 recycle：这些 Bitmap 可能仍被 ImageView 持有，交给 GC 回收。
+        // 注意：refresh()/setConfig() 不清理本缓存（磁盘 jpg 与 host/port 无关，清了必然重现黑块）。
+        diskBitmapCache.clear();
         // shutdownNow：丢弃排队等待的抓图/抓帧任务（在途任务自然跑完，但不再回填 UI）
         executor.shutdownNow();
         rtspExecutor.shutdownNow();
