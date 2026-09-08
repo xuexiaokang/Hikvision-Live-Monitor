@@ -11,6 +11,8 @@ captures/
 *.keystore
 *.jks
 *.pfx
+# 签名密码配置（含 storePassword/keyPassword，绝不入库）
+keystore.properties
 
 # ===== 机器/环境特定配置 =====
 # local.properties 含 SDK 绝对路径，每台机器不同
