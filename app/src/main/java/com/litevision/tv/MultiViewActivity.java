@@ -527,10 +527,40 @@ public class MultiViewActivity extends AppCompatActivity {
                         // 视频尺寸已就绪 → 校正 center-crop，避免底部花屏
                         slots[index].applyCropIfNeeded();
 
-                        // ===== 预热模式：所有通道都播放后统一截帧 =====
-                        if (autoCapture && startedSlots.size() >= captureTotal) {
-                            Log.i(TAG, "所有通道已播放，开始全局截帧");
-                            scheduleGlobalThumbCapture();
+                        // ===== 排期缩略图截图（"真实播放帧做缩略图"方案）=====
+                        // onPlaying 后延迟截帧，给慢通道更多起播时间。
+                        // 每槽位只截一次（slotThumbCaptured 守门）。
+                        if (!slotThumbCaptured[index] && autoCapture) {
+                            final int slotIndex = index;
+                            final ChannelTileView tile = slots[index];
+                            // 先清旧 runnable（防并发翻页同一槽位多次排期）
+                            Runnable old = slotThumbRunnable[slotIndex];
+                            if (old != null) {
+                                handler.removeCallbacks(old);
+                            }
+                            final int finalChannelIndex = ch;
+                            Runnable r = new Runnable() {
+                                @Override
+                                public void run() {
+                                    if (isFinishing() || isDestroyed()) {
+                                        return;
+                                    }
+                                    if (slotThumbCaptured[slotIndex]) {
+                                        return;
+                                    }
+                                    if (slotIndex < 0 || slotIndex >= MAX_SLOTS
+                                            || slots[slotIndex] == null
+                                            || !slotActive[slotIndex]) {
+                                        return;
+                                    }
+                                    slotThumbCaptured[slotIndex] = true;
+                                    slots[slotIndex].captureThumbnailToCache(MultiViewActivity.this);
+                                    // 预热模式：推进进度条（发起即计数，失败也算已处理，保证进度走完）
+                                    onCaptureProgressed();
+                                }
+                            };
+                            slotThumbRunnable[slotIndex] = r;
+                            handler.postDelayed(r, THUMB_CAPTURE_DELAY_MS);
                         }
                     }
                 });
@@ -1731,40 +1761,11 @@ public class MultiViewActivity extends AppCompatActivity {
                     }
                 });
             }
-            // 让用户看到"完成"再返回，避免一闪而过（加长到 2.5s）
+            // 让用户看到"完成"再返回，避免一闪而过
             handler.postDelayed(() -> {
                 if (!isFinishing() && !isDestroyed()) finish();
-            }, 2500);
+            }, 700);
         }
-    }
-
-    /**
-     * 预热模式：所有通道都播放后，统一逐路截帧（比各通道独立截帧更稳定）。
-     * <p>先等待 2s 让画面完全稳定，然后按顺序对每个未捕获的槽位发起截帧，每路间隔 500ms 避免冲突。</p>
-     */
-    private void scheduleGlobalThumbCapture() {
-        if (captureFinishing) return;
-        Log.i(TAG, "等待画面稳定后全局截帧");
-        handler.postDelayed(() -> {
-            if (isFinishing() || isDestroyed()) return;
-            captureFinishing = true;
-            // 逐路截帧，每路间隔 500ms 避免 PixelCopy 冲突
-            final int total = layoutSize;
-            for (int i = 0; i < total; i++) {
-                final int slotIndex = i;
-                final Runnable r = new Runnable() {
-                    @Override
-                    public void run() {
-                        if (isFinishing() || isDestroyed()) return;
-                        if (slotThumbCaptured[slotIndex] || !slotActive[slotIndex] || slots[slotIndex] == null) return;
-                        slotThumbCaptured[slotIndex] = true;
-                        slots[slotIndex].captureThumbnailToCache(MultiViewActivity.this);
-                        onCaptureProgressed();
-                    }
-                };
-                handler.postDelayed(r, i * 500L);
-            }
-        }, 2000L);
     }
 
     private void setHint(String text) {
