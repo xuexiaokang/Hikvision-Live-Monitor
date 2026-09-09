@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 通道卡片：无边距、无圆角，缩略图完全填满格子 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:background="@drawable/channel_card_normal"
-    android:layout_margin="6dp"
+    android:background="@android:color/transparent"
+    android:layout_margin="0dp"
     android:focusable="true"
     android:clickable="true">
 
@@ -13,23 +14,13 @@
         android:layout_height="180dp"
         android:background="#000000">
 
-        <!-- 真 TextureView：libVLC RTSP 抓帧渲染到这里（与多画面同路径，已验证 vout 正常出图）。
-             ★ 关键约束：TextureView 不能设 android:background（设了直接 InflateException 崩
-             —— TextureView 必须保持透明，alpha 通道传给 SurfaceFlinger，背景会破坏合成）。
-             黑底视觉由外层 FrameLayout background="#000000" 提供。
-             ★ IV 必须 visibility="gone"：未 gone 时 IV 完全覆盖 TV 像素，SurfaceFlinger 仍把
-             TV 视为 abandoned（与"offscreen 池"死路同源）。gone 后 TV 直接露出 → SurfaceFlinger
-             视为合成中 → 不 abandon。 -->
+        <!-- 真 TextureView：libVLC RTSP 抓帧渲染到这里 -->
         <TextureView
             android:id="@+id/tv_thumbnail"
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
 
-        <!-- 占位图：HTTP ISAPI 抓到图时直接显示；RTSP 抓帧拿图后也会覆盖到这里。
-             ★ 必须 visibility="gone"（不能 gone 之外的"覆盖但不可见"）：gone 的 View
-             不参与绘制/合成，TV 直接露出 → SurfaceFlinger 视为合成中 → 不 abandon。
-             setImageBitmap()/setImageResource() 仍生效（只是不显示）——保留它是因为
-             ChannelAdapter 里 onSuccess 回填 placeholder/bmp 流程不动，避免大改。 -->
+        <!-- 缩略图占位/缓存：centerCrop 填满容器 -->
         <ImageView
             android:id="@+id/iv_thumbnail"
             android:layout_width="match_parent"
@@ -39,6 +30,7 @@
             android:visibility="gone"
             android:contentDescription="通道预览" />
 
+        <!-- 通道名标签 -->
         <TextView
             android:id="@+id/tv_channel_name"
             android:layout_width="match_parent"
@@ -53,9 +45,7 @@
             android:paddingEnd="8dp"
             android:paddingBottom="4dp"
             android:singleLine="true"
-            android:ellipsize="end"
-            android:layout_marginTop="6dp"
-            android:layout_marginBottom="8dp" />
+            android:ellipsize="end" />
     </FrameLayout>
 
 </LinearLayout>

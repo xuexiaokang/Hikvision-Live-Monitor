@@ -6,74 +6,87 @@
     android:background="#0A1929"
     android:padding="16dp">
 
+    <!-- 顶部栏：标题一行 + 操作按钮一行。
+         ★ 必须分两行，否则手机竖屏(393dp)下"长标题 + 3按钮"挤在一行：
+           标题 layout_weight=1 被压缩到极窄 → 长文本(含域名)自动换行竖排，
+           把按钮推得位置错乱（用户投诉"列表页只看到三个按钮"的根因）。 -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
+        android:orientation="vertical"
         android:gravity="center_vertical"
         android:layout_marginBottom="16dp">
 
         <TextView
             android:id="@+id/tv_title"
-            android:layout_width="0dp"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
+            android:maxLines="1"
+            android:ellipsize="end"
             android:text="@string/main_title"
             android:textColor="#FFFFFF"
-            android:textSize="28sp"
-            android:textStyle="bold" />
+            android:textSize="22sp"
+            android:textStyle="bold"
+            android:paddingBottom="10dp" />
 
-        <!-- 与设置页同理：写全限定名 android.widget.Button，避免被 MaterialComponents
-             主题 inflate 成 MaterialButton 而吃掉 android:background 与 Java 的
-             setBackgroundResource()（否则常态是 Material 蓝 #0D47A1、聚焦无白环）。 -->
-        <android.widget.Button
-            android:id="@+id/btn_refresh_thumbs"
-            android:layout_width="wrap_content"
-            android:layout_height="56dp"
-            android:text="@string/refresh_thumbs"
-            android:textSize="16sp"
-            android:background="@drawable/channel_card_normal"
-            android:textColor="#CCFFFFFF"
-            android:elevation="0dp"
-            android:stateListAnimator="@null"
-            android:paddingStart="20dp"
-            android:paddingEnd="20dp"
-            android:layout_marginEnd="12dp"
-            android:nextFocusRight="@id/btn_multi_view"
-            android:nextFocusDown="@id/recycler_channels" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
 
-        <android.widget.Button
-            android:id="@+id/btn_multi_view"
-            android:layout_width="wrap_content"
-            android:layout_height="56dp"
-            android:text="@string/multi_view"
-            android:textSize="16sp"
-            android:background="@drawable/channel_card_normal"
-            android:textColor="#CCFFFFFF"
-            android:elevation="0dp"
-            android:stateListAnimator="@null"
-            android:paddingStart="24dp"
-            android:paddingEnd="24dp"
-            android:layout_marginEnd="12dp"
-            android:nextFocusLeft="@id/btn_refresh_thumbs"
-            android:nextFocusRight="@id/btn_settings"
-            android:nextFocusDown="@id/recycler_channels" />
+            <!-- 与设置页同理：写全限定名 android.widget.Button，避免被 MaterialComponents
+                 主题 inflate 成 MaterialButton 而吃掉 android:background 与 Java 的
+                 setBackgroundResource()（否则常态是 Material 蓝 #0D47A1、聚焦无白环）。 -->
+            <android.widget.Button
+                android:id="@+id/btn_refresh_thumbs"
+                android:layout_width="wrap_content"
+                android:layout_height="56dp"
+                android:text="@string/refresh_thumbs"
+                android:textSize="16sp"
+                android:background="@drawable/channel_card_normal"
+                android:textColor="#CCFFFFFF"
+                android:elevation="0dp"
+                android:stateListAnimator="@null"
+                android:paddingStart="20dp"
+                android:paddingEnd="20dp"
+                android:layout_marginEnd="12dp"
+                android:nextFocusRight="@id/btn_multi_view"
+                android:nextFocusDown="@id/recycler_channels" />
 
-        <android.widget.Button
-            android:id="@+id/btn_settings"
-            android:layout_width="wrap_content"
-            android:layout_height="56dp"
-            android:text="@string/settings"
-            android:textSize="16sp"
-            android:background="@drawable/channel_card_normal"
-            android:textColor="#CCFFFFFF"
-            android:elevation="0dp"
-            android:stateListAnimator="@null"
-            android:paddingStart="24dp"
-            android:paddingEnd="24dp"
-            android:nextFocusLeft="@id/btn_multi_view"
-            android:nextFocusRight="@id/btn_settings"
-            android:nextFocusDown="@id/recycler_channels" />
+            <android.widget.Button
+                android:id="@+id/btn_multi_view"
+                android:layout_width="wrap_content"
+                android:layout_height="56dp"
+                android:text="@string/multi_view"
+                android:textSize="16sp"
+                android:background="@drawable/channel_card_normal"
+                android:textColor="#CCFFFFFF"
+                android:elevation="0dp"
+                android:stateListAnimator="@null"
+                android:paddingStart="24dp"
+                android:paddingEnd="24dp"
+                android:layout_marginEnd="12dp"
+                android:nextFocusLeft="@id/btn_refresh_thumbs"
+                android:nextFocusRight="@id/btn_settings"
+                android:nextFocusDown="@id/recycler_channels" />
+
+            <android.widget.Button
+                android:id="@+id/btn_settings"
+                android:layout_width="wrap_content"
+                android:layout_height="56dp"
+                android:text="@string/settings"
+                android:textSize="16sp"
+                android:background="@drawable/channel_card_normal"
+                android:textColor="#CCFFFFFF"
+                android:elevation="0dp"
+                android:stateListAnimator="@null"
+                android:paddingStart="24dp"
+                android:paddingEnd="24dp"
+                android:nextFocusLeft="@id/btn_multi_view"
+                android:nextFocusRight="@id/btn_settings"
+                android:nextFocusDown="@id/recycler_channels" />
+        </LinearLayout>
     </LinearLayout>
 
     <FrameLayout
@@ -86,6 +99,8 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:clipToPadding="false"
+            android:paddingLeft="3dp"
+            android:paddingRight="3dp"
             android:paddingBottom="8dp" />
 
         <ProgressBar
