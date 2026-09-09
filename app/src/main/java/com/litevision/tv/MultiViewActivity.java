@@ -101,6 +101,8 @@ public class MultiViewActivity extends AppCompatActivity {
     private final boolean[] slotThumbCaptured = new boolean[MAX_SLOTS];
     /** 每格"截图 Runnable"引用：用于 onPause/onDestroy 时按槽位精确取消排期。 */
     private final Runnable[] slotThumbRunnable = new Runnable[MAX_SLOTS];
+    /** 每格是否已收到 onVideoSizeChanged（首帧渲染信号），用于智能截帧判断。 */
+    private final boolean[] slotVideoSizeChanged = new boolean[MAX_SLOTS];
 
     private GridLayout grid;
     private TextView tvHint;
@@ -477,6 +479,7 @@ public class MultiViewActivity extends AppCompatActivity {
         for (int i = 0; i < MAX_SLOTS; i++) {
             slotActive[i] = false;
             slotThumbCaptured[i] = false;
+            slotVideoSizeChanged[i] = false;
             // 旧引擎由调用方（switchLayout/onDestroy）负责释放
         }
         activeSlots.clear();
@@ -603,9 +606,9 @@ public class MultiViewActivity extends AppCompatActivity {
                 runOnUiThread(() -> {
                     if (index >= 0 && index < MAX_SLOTS && slots[index] != null) {
                         slots[index].applyCropIfNeeded();
-                        // ===== ★ 截帧快路径：视频尺寸确定意味着首帧已渲染 =====
-                        // 比 onPlaying + 2.5s 更可靠，避免高峰时段截到黑帧。
-                        // 若 onVideoSizeChanged 始终没来，onPlaying 的兜底路径仍会触发。
+                        slotVideoSizeChanged[index] = true;
+                        // ===== ★ 智能截帧：视频尺寸确定意味着首帧已渲染，此时截帧最可靠 =====
+                        // 优先级高于 onPlaying 的兜底路径。
                         if (!slotThumbCaptured[index] && autoCapture) {
                             final int slotIndex = index;
                             final ChannelTileView tile = slots[index];
@@ -625,7 +628,8 @@ public class MultiViewActivity extends AppCompatActivity {
                                 }
                             };
                             slotThumbRunnable[slotIndex] = r;
-                            handler.postDelayed(r, 500L);
+                            // 首帧渲染后再等 800ms 让画面完全稳定
+                            handler.postDelayed(r, 800L);
                         }
                     }
                 });
