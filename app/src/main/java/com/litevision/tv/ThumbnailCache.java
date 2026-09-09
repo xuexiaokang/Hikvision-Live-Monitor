@@ -102,16 +102,24 @@ public final class ThumbnailCache {
                     scaled.recycle();
                 }
                 if (ok) {
-                    // 压缩成功才写盘
-                    java.nio.ByteBuffer buf = java.nio.ByteBuffer.wrap(baos.toByteArray());
-                    java.nio.channels.FileChannel fc = new java.io.FileOutputStream(out).getChannel();
-                    try {
-                        fc.write(buf);
-                    } finally {
-                        fc.close();
+                    byte[] data = baos.toByteArray();
+                    // ★ 修复：文件大小过小说明是黑帧/无效画面，不写盘
+                    if (data.length < MIN_VALID_JPEG_SIZE) {
+                        Log.w(TAG, "ch" + channelIndex + " 缩略图过小 " + data.length
+                                + " bytes，判为黑帧丢弃");
+                        ok = false;
+                    } else {
+                        // 压缩成功才写盘
+                        java.nio.ByteBuffer buf = java.nio.ByteBuffer.wrap(data);
+                        java.nio.channels.FileChannel fc = new java.io.FileOutputStream(out).getChannel();
+                        try {
+                            fc.write(buf);
+                        } finally {
+                            fc.close();
+                        }
+                        Log.i(TAG, "saved ch" + channelIndex + " ok=" + ok
+                                + " size=" + out.length() + " bytes");
                     }
-                    Log.i(TAG, "saved ch" + channelIndex + " ok=" + ok
-                            + " size=" + out.length() + " bytes");
                 } else {
                     Log.w(TAG, "ch" + channelIndex + " JPEG compress failed");
                 }

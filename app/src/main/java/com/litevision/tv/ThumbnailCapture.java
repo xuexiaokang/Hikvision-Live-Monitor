@@ -335,7 +335,9 @@ public final class ThumbnailCapture {
         }
         long black = 0;
         long total = 0;
-        // 采样步长：横向 16 格 × 纵向 16 格 ≈ 256 个采样点，足够判断
+        long brightnessSum = 0;
+        long brightnessSumSq = 0;
+        // 采样步长：横向 16 格 × 纵向 16 格 ≈ 256 个采样点
         int sx = Math.max(1, w / 16);
         int sy = Math.max(1, h / 16);
         for (int y = 0; y < h; y += sy) {
@@ -344,13 +346,22 @@ public final class ThumbnailCapture {
                 int r = (c >> 16) & 0xFF;
                 int g = (c >> 8) & 0xFF;
                 int b = c & 0xFF;
+                int lum = (r + g + b) / 3;
                 // 亮度过低（近似黑）阈值取 12：夜视画面虽暗但一般 > 12，纯黑 buffer 恒为 0
                 if (r < 12 && g < 12 && b < 12) {
                     black++;
                 }
+                brightnessSum += lum;
+                brightnessSumSq += (long) lum * lum;
                 total++;
             }
         }
-        return total > 0 && (black * 100 / total) >= 95;
+        // 亮度阈值：近全黑比例 > 90%（降低阈值，更严格）
+        boolean mostlyDark = total > 0 && (black * 100 / total) >= 90;
+        // 方差检测：所有采样点亮度几乎相同（方差 < 8），说明没有真实画面内容
+        double mean = brightnessSum / (double) total;
+        double variance = (brightnessSumSq / (double) total) - (mean * mean);
+        boolean noContent = variance < 8.0;
+        return mostlyDark && noContent;
     }
 }
