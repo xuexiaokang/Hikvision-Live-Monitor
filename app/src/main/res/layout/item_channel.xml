@@ -6,16 +6,11 @@
     android:background="@drawable/channel_card_normal"
     android:layout_margin="6dp"
     android:focusable="true"
-    android:clickable="true"
-    android:minHeight="160dp"
-    android:gravity="center">
+    android:clickable="true">
 
     <FrameLayout
         android:layout_width="match_parent"
-        android:layout_height="100dp"
-        android:layout_marginStart="8dp"
-        android:layout_marginEnd="8dp"
-        android:layout_marginTop="8dp"
+        android:layout_height="180dp"
         android:background="#000000">
 
         <!-- 真 TextureView：libVLC RTSP 抓帧渲染到这里（与多画面同路径，已验证 vout 正常出图）。
