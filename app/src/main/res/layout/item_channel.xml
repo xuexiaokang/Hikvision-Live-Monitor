@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 通道卡片：无边距、无圆角，缩略图完全填满格子 -->
+<!-- 通道卡片：圆角边框 + 黑边缩略图，缩略图填满FrameLayout -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:background="@android:color/transparent"
+    android:background="@drawable/channel_card_normal"
     android:layout_margin="0dp"
     android:focusable="true"
     android:clickable="true">
