@@ -33,8 +33,8 @@ public final class ThumbnailCache {
 
     private static final String TAG = "ThumbnailCache";
     private static final String DIR_NAME = "thumbnails";
-    private static final int THUMB_WIDTH = 480;   // 列表卡片宽度的 1.5x，留点富余
-    private static final int THUMB_HEIGHT = 270;  // 16:9
+    public static final int THUMB_WIDTH = 480;   // 列表卡片宽度的 1.5x，留点富余
+    public static final int THUMB_HEIGHT = 270;  // 16:9
     private static final int JPEG_QUALITY = 80;
 
     /** 后台 IO 线程：写盘 / 读图解码（独立线程，避免压 libVLC 事件 / 主线程） */
@@ -94,8 +94,10 @@ public final class ThumbnailCache {
             boolean ok = false;
             File out = getFile(ctx, channelIndex);
             try (FileOutputStream fos = new FileOutputStream(out)) {
-                // 缩放到目标尺寸再压缩，省空间 + 加载更快
-                Bitmap scaled = scaleToTarget(bitmap, THUMB_WIDTH, THUMB_HEIGHT);
+                // ★ 修复（v19）：强制等比缩放+中心裁切为 480×270（16:9）。
+                //   原因：列表格容器是固定 100dp 高度 + match_parent 宽度，ratio≈16:9。
+                //   任何非 16:9 的截图在 centerCrop 时会出现上下留白。
+                Bitmap scaled = scaleToTargetFix16x9(bitmap, THUMB_WIDTH, THUMB_HEIGHT);
                 ok = scaled.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, fos);
                 if (scaled != bitmap) {
                     scaled.recycle();
@@ -191,6 +193,32 @@ public final class ThumbnailCache {
         int nw = Math.max(1, Math.round(src.getWidth() * ratio));
         int nh = Math.max(1, Math.round(src.getHeight() * ratio));
         return Bitmap.createScaledBitmap(src, nw, nh, true);
+    }
+
+    /**
+     * 等比缩放 + 中心裁切，输出精确目标尺寸（cover 语义）。
+     */
+    public static Bitmap scaleToTargetFix16x9(Bitmap src, int targetW, int targetH) {
+        int sw = src.getWidth();
+        int sh = src.getHeight();
+        if (sw == targetW && sh == targetH) {
+            return src;
+        }
+        float scaleW = (float) targetW / sw;
+        float scaleH = (float) targetH / sh;
+        float scale = Math.max(scaleW, scaleH);
+        int scaledW = Math.max(1, Math.round(sw * scale));
+        int scaledH = Math.max(1, Math.round(sh * scale));
+        Bitmap scaled = Bitmap.createScaledBitmap(src, scaledW, scaledH, true);
+        int cropX = Math.max(0, (scaledW - targetW) / 2);
+        int cropY = Math.max(0, (scaledH - targetH) / 2);
+        int cropW = Math.min(targetW, scaledW - cropX);
+        int cropH = Math.min(targetH, scaledH - cropY);
+        Bitmap result = Bitmap.createBitmap(scaled, cropX, cropY, cropW, cropH);
+        if (scaled != src) {
+            scaled.recycle();
+        }
+        return result;
     }
 
     /** 写盘完成回调（在主线程派发）。 */

@@ -63,10 +63,12 @@ public class MultiViewActivity extends AppCompatActivity {
     private static final long LONG_PRESS_MS = 800;
     private static final int SWIPE_THRESHOLD = 100;
     /**
-     * 缩略图截图延时（毫秒）。onPlaying 后 2.5s 截当前帧 → 本地缓存。
-     * 与 PlayerActivity 同步：让首帧/缓冲彻底结束，避免截到过渡帧。
+     * 缩略图截图延时（毫秒）：onPlaying 后兜底延时。
+     *  onVideoSizeChanged 后 500ms 是首选（首帧已渲染），但若该回调迟迟不来，
+     *  onPlaying 的兜底路径会保证即便没有首帧信号也能触发截帧（靠 ThumbnailCapture
+     *  内部黑帧重试，最多 3 次总间隔 5.4s，覆盖绝大多数首帧延迟）。
      */
-    private static final long THUMB_CAPTURE_DELAY_MS = 2500L;
+    private static final long THUMB_CAPTURE_DELAY_MS = 4000L;
     /**
      * 顶部手势提示文字显示时长（毫秒）。显示后自动消失，避免长期遮挡画面——
      * 手机/平板上尤其碍眼，电视端遥控器用户也只需要看一次提示。
@@ -109,8 +111,20 @@ public class MultiViewActivity extends AppCompatActivity {
     private boolean useSubStream = true; // 多画面码流（独立键 multi_use_sub）
     /** 自动预热模式（列表页"刷新缩略图"按钮触发）：强制 9 宫格 + 截帧后自动回列表。 */
     private boolean autoCapture = false;
-    /** 自动预热兜底超时（毫秒）：9 路播放 + 2.5s 截帧，留足余量后强制 finish 回列表。 */
-    private static final long AUTO_CAPTURE_TIMEOUT_MS = 15000L;
+    /** 自动预热兜底超时（毫秒）：9 路播放 + 4s 兜底截帧 + 5 次重试（每 1.8s）。
+     *  最坏情况 9 路都慢：onPlaying → 4s 截帧 → 黑帧重试 1.8s×4 = 9s，合计约 13s。
+     *  给 25s 留足余量，避免慢通道还没走完重试就被强制 finish。 */
+    private static final long AUTO_CAPTURE_TIMEOUT_MS = 25000L;
+    // ===== 预热进度条（"刷新缩略图"）：让用户看到 n/total 进度，避免误以为卡死而中断 =====
+    private View layoutCaptureProgress;
+    private android.widget.ProgressBar pbCapture;
+    private TextView tvCaptureProgress;
+    /** 本轮需要截帧的总路数（= min(宫格数, 有效通道数)）。 */
+    private int captureTotal = 0;
+    /** 已发起截帧的路数（发起即计数，失败也算已处理，保证进度能走完不卡住）。 */
+    private int captureProgress = 0;
+    /** 已全部完成并正在退出，避免超时回调与完成回调重复 finish。 */
+    private boolean captureFinishing = false;
 
     // ===== 宫格内嵌全屏（双击）状态 =====
     /** 当前内嵌全屏的格子索引；-1 = 普通宫格模式。格子内的 ChannelTileView 被临时移到全屏容器。 */
@@ -280,10 +294,43 @@ public class MultiViewActivity extends AppCompatActivity {
         // isTouchDevice 仅用于提示文案与 pager 显示，不参与手势是否建立。
         initTouchSupport();
         if (autoCapture) {
-            setHint(getString(R.string.refresh_thumbs_hint));
+            // ★ 修复（2026-09-08）：预热模式下 tv_hint 是 FrameLayout 里盖在 GridLayout
+            //   之上的顶部覆盖条（gravity=top|center_horizontal），PixelCopy(Window) 截
+            //   第一排格子时会把"正在生成缩略图…"整条提示一起截进缩略图（用户反馈
+            //   "截图混乱 / 把提示文字也截取了"）。
+            //   改为 Toast 提示（Toast 是独立 Window，不参与本窗口合成，不会被 PixelCopy 截到），
+            //   并隐藏顶部提示条，保证缩略图里只有视频画面。
+            if (tvHint != null) tvHint.setVisibility(View.GONE);
+            // 底部页码指示条同理（gravity=bottom），会盖住最后一排格子 → 一并隐藏
+            if (tvPageIndicator != null) tvPageIndicator.setVisibility(View.GONE);
+            Toast.makeText(this, getString(R.string.refresh_thumbs_hint), Toast.LENGTH_SHORT).show();
+
+            // ===== 预热进度条：贴屏显示 n/total，避免用户以为卡死而手动中断 =====
+            // ★ 进度条是窗口覆盖层，会被 PixelCopy 截进缩略图 → 注册到 ThumbnailCapture，
+            //   每次截帧瞬间自动隐藏、截完恢复（"看得见进度，又不污染缩略图"）。
+            layoutCaptureProgress = findViewById(R.id.layout_capture_progress);
+            pbCapture = findViewById(R.id.pb_capture);
+            tvCaptureProgress = findViewById(R.id.tv_capture_progress);
+            if (layoutCaptureProgress != null) {
+                // 分母 = min(宫格数, 有效通道数)；通道列表未拉到(getChannelCount()==0)时按宫格数算
+                int totalCh = config.getChannelCount();
+                captureTotal = Math.max(1,
+                        Math.min(layoutSize, totalCh > 0 ? totalCh : layoutSize));
+                captureProgress = 0;
+                if (pbCapture != null) {
+                    pbCapture.setMax(captureTotal);
+                    pbCapture.setProgress(0);
+                }
+                if (tvCaptureProgress != null) {
+                    tvCaptureProgress.setText(getString(R.string.capture_progress, 0, captureTotal));
+                }
+                layoutCaptureProgress.setVisibility(View.VISIBLE);
+                ThumbnailCapture.addHideOnCapture(layoutCaptureProgress);
+            }
+
             // 兜底超时：无论截帧是否全部成功，到点都 finish 回列表，避免卡死在多画面。
             handler.postDelayed(() -> {
-                if (!isFinishing() && !isDestroyed()) {
+                if (!isFinishing() && !isDestroyed() && !captureFinishing) {
                     Log.i(TAG, "自动预热超时（" + AUTO_CAPTURE_TIMEOUT_MS + "ms），finish 回列表");
                     finish();
                 }
@@ -351,6 +398,11 @@ public class MultiViewActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
         handler.removeCallbacksAndMessages(null);
+        // 注销"截帧时临时隐藏"的注册，避免静态表持有已销毁 Activity 的 View
+        if (layoutCaptureProgress != null) {
+            ThumbnailCapture.removeHideOnCapture(layoutCaptureProgress);
+            layoutCaptureProgress = null;
+        }
         releaseAllSlots();
         final LibVLC oldLib = libVLC;
         libVLC = null;
@@ -469,7 +521,7 @@ public class MultiViewActivity extends AppCompatActivity {
                         // ===== 排期缩略图截图（"真实播放帧做缩略图"方案）=====
                         // onPlaying 后 2.5s 用 PixelCopy 截当前帧 → ThumbnailCache。
                         // 每槽位只截一次（slotThumbCaptured 守门）；翻页/换源会触发 play() → onPlaying 重置。
-                        if (!slotThumbCaptured[index]) {
+                        if (!slotThumbCaptured[index] && autoCapture) {
                             final int slotIndex = index;
                             final ChannelTileView tile = slots[index];
                             // 先清旧 runnable（防并发翻页同一槽位多次排期）
@@ -494,6 +546,8 @@ public class MultiViewActivity extends AppCompatActivity {
                                     }
                                     slotThumbCaptured[slotIndex] = true;
                                     slots[slotIndex].captureThumbnailToCache(MultiViewActivity.this);
+                                    // 预热模式：推进进度条（发起即计数，失败也算已处理，保证进度走完）
+                                    onCaptureProgressed();
                                 }
                             };
                             slotThumbRunnable[slotIndex] = r;
@@ -540,6 +594,30 @@ public class MultiViewActivity extends AppCompatActivity {
                 runOnUiThread(() -> {
                     if (index >= 0 && index < MAX_SLOTS && slots[index] != null) {
                         slots[index].applyCropIfNeeded();
+                        // ===== ★ 截帧快路径：视频尺寸确定意味着首帧已渲染 =====
+                        // 比 onPlaying + 2.5s 更可靠，避免高峰时段截到黑帧。
+                        // 若 onVideoSizeChanged 始终没来，onPlaying 的兜底路径仍会触发。
+                        if (!slotThumbCaptured[index] && autoCapture) {
+                            final int slotIndex = index;
+                            final ChannelTileView tile = slots[index];
+                            Runnable old = slotThumbRunnable[slotIndex];
+                            if (old != null) handler.removeCallbacks(old);
+                            final Runnable r = new Runnable() {
+                                @Override
+                                public void run() {
+                                    if (isFinishing() || isDestroyed()) return;
+                                    if (slotThumbCaptured[slotIndex]) return;
+                                    if (slotIndex < 0 || slotIndex >= MAX_SLOTS
+                                            || slots[slotIndex] == null
+                                            || !slotActive[slotIndex]) return;
+                                    slotThumbCaptured[slotIndex] = true;
+                                    slots[slotIndex].captureThumbnailToCache(MultiViewActivity.this);
+                                    onCaptureProgressed();
+                                }
+                            };
+                            slotThumbRunnable[slotIndex] = r;
+                            handler.postDelayed(r, 500L);
+                        }
                     }
                 });
             }
@@ -1610,6 +1688,37 @@ public class MultiViewActivity extends AppCompatActivity {
      * 显示顶部手势提示文字，HINT_DURATION_MS 后自动隐藏。
      * 每次显示都会重新排期，避免重叠调用导致永不消失。
      */
+    /**
+     * 预热模式（"刷新缩略图"）进度推进：每发起一路截帧调用一次。
+     *
+     * <p>发起即计数（截帧失败也算已处理），保证进度条一定能走完，不卡在半途让用户以为
+     * 死机而手动中断。全部完成后短暂停留显示"完成"，再回列表。</p>
+     */
+    private void onCaptureProgressed() {
+        if (!autoCapture) return;
+        captureProgress++;
+        if (captureProgress > captureTotal) {
+            captureTotal = captureProgress; // 兜底：实际路数多于预估时同步放大分母
+            if (pbCapture != null) pbCapture.setMax(captureTotal);
+        }
+        if (pbCapture != null) pbCapture.setProgress(captureProgress);
+        if (tvCaptureProgress != null) {
+            tvCaptureProgress.setText(getString(R.string.capture_progress,
+                    captureProgress, captureTotal));
+        }
+        Log.i(TAG, "预热进度: " + captureProgress + "/" + captureTotal);
+        if (captureProgress >= captureTotal && !captureFinishing) {
+            captureFinishing = true;
+            if (tvCaptureProgress != null) {
+                tvCaptureProgress.setText(R.string.capture_done);
+            }
+            // 让用户看到"完成"再返回，避免一闪而过
+            handler.postDelayed(() -> {
+                if (!isFinishing() && !isDestroyed()) finish();
+            }, 700);
+        }
+    }
+
     private void setHint(String text) {
         if (tvHint == null) return;
         tvHint.setText(text);

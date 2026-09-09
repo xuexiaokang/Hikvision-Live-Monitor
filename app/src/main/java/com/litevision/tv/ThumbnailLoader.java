@@ -96,7 +96,12 @@ public class ThumbnailLoader {
      * 会露出外层 FrameLayout 的 #000000 黑底 —— 这正是用户看到的"缩略图丢失/黑块"。
      * 缓存解码结果后，同一个通道再次 bind 直接同步 setImageBitmap，零空白窗口。
      */
-    private final Map<Integer, Bitmap> diskBitmapCache = new ConcurrentHashMap<>();
+    // ★★★ static：内存缩略图缓存必须全局共享。原因——列表页 ChannelAdapter 用
+    //   new ThumbnailLoader(context) 自己的实例（需 Activity context 挂 offscreen 抓帧池），
+    //   而预热流程 ThumbnailCapture 走 getInstance() 单例（application context）。
+    //   若这里非 static，两实例 diskBitmapCache 互不共享 → primeDiskCache 写进单例、列表页
+    //   读的是适配器实例 → 读不到 → 只能异步 decodeFile → 回列表短暂空白/占位。
+    public static final Map<Integer, Bitmap> diskBitmapCache = new ConcurrentHashMap<>();
     /** 应用上下文（getFilesDir 用于本地缩略图缓存）。 */
     private final Context appContext;
     /** 在途抓图去重：re-bind 会重复触发 load()，同 key 并发只抓一次 */
@@ -158,6 +163,29 @@ public class ThumbnailLoader {
             java.util.Collections.synchronizedSet(
                     java.util.Collections.newSetFromMap(
                             new java.util.WeakHashMap<android.view.TextureView, Boolean>()));
+
+    /** 单例（全局共享磁盘位图缓存 + 抓帧状态）。 */
+    private static volatile ThumbnailLoader sInstance;
+
+    /**
+     * 获取（或惰性创建）应用级单例。任何调用方拿到的实例都共享同一份 {@link #diskBitmapCache}，
+     * 适合"在 Activity 外把 bitmap 推进内存缓存"的场景（如 {@code ThumbnailCapture}
+     * 在 IO 回调里直接 primeDiskCache）。
+     */
+    public static ThumbnailLoader getInstance(Context ctx) {
+        ThumbnailLoader inst = sInstance;
+        if (inst != null) return inst;
+        synchronized (ThumbnailLoader.class) {
+            inst = sInstance;
+            if (inst == null) {
+                Context app = ctx.getApplicationContext();
+                inst = new ThumbnailLoader(app, new Handler(Looper.getMainLooper()));
+                sInstance = inst;
+                Log.i("ThumbnailLoader", "getInstance: 创建应用级单例");
+            }
+            return inst;
+        }
+    }
 
     public ThumbnailLoader(Context context) {
         this(context, null);
@@ -519,6 +547,30 @@ public class ThumbnailLoader {
         }
         diskBitmapCache.put(channelIndex, bitmap);
         ThumbnailCache.save(appContext, channelIndex, bitmap, null);
+    }
+
+    /** 预热（列表页"刷新缩略图"流程）截帧成功后同步落盘缓存：让回列表时 holder 直接命中
+     * 内存缓存同步出图，避免 RecyclerView 异步 decodeFile 的短暂空白窗口被误判成"没图"。
+     *
+     * <p>背景：{@link com.litevision.tv.ThumbnailCapture#captureToCacheFile} 走的是
+     * {@link ThumbnailCache#save} 异步 IO 路径，<b>不经过</b>本类的 {@link #persistToDisk}，
+     * 因此 {@link #diskBitmapCache} 不会同步更新，回列表后 holder 只能异步 decodeFile →
+     * setImageBitmap，主线程看到的是占位块的过渡帧（v6 修复时已经实测 &lt;50ms，但实际取决于
+     * 磁盘速度，频繁闪屏/低端机可能 200ms+）。这里把截到的 bitmap 同步写进内存缓存，
+     * 下次回列表 holder 直接命中缓存、同步 setImageBitmap，彻底消除"回列表看到几个
+     * 格子没图"的现象。</p>
+     *
+     * @param channelIndex 0-based 通道索引
+     * @param bitmap       截到的原始帧（不会被 recycle，由调用方继续复用）
+     */
+    public void primeDiskCache(int channelIndex, Bitmap bitmap) {
+        if (bitmap == null || bitmap.isRecycled() || appContext == null) return;
+        Bitmap scaled = ThumbnailCache.scaleToTargetFix16x9(bitmap, ThumbnailCache.THUMB_WIDTH,
+                ThumbnailCache.THUMB_HEIGHT);
+        if (scaled == null) return;
+        diskBitmapCache.put(channelIndex, scaled);
+        Log.d("ThumbnailLoader", "primeDiskCache ch" + channelIndex
+                + " " + scaled.getWidth() + "x" + scaled.getHeight());
     }
 
     /** 失败：指数退避冷却 + 排期一次自动重试；有历史图或达上限则不再自动重试（防无限打 NVR）。 */
