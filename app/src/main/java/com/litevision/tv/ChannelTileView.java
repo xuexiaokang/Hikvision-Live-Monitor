@@ -467,7 +467,7 @@ public class ChannelTileView extends FrameLayout {
             setBackgroundResource(R.drawable.channel_tile_focused);
             setForeground(getDrawable(R.drawable.channel_tile_focused_overlay));
         } else {
-            setBackgroundResource(R.drawable.channel_card_normal);
+            setBackgroundResource(R.drawable.channel_tile_normal);
             setForeground(null);
         }
     }
