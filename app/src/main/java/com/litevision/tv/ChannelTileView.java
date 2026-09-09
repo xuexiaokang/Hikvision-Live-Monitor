@@ -298,6 +298,7 @@ public class ChannelTileView extends FrameLayout {
         tvChannelName.setText(name);
         showName(true);
         showError(null);
+        Log.i(TAG, "bind ch=" + channelIndex + " useSub=" + useSub + " name=" + name);
         updateStreamIndicator(useSub);
         setFocused(false);
         fillApplied = false; // 换通道/复用格子，需等新帧重新收敛 fill

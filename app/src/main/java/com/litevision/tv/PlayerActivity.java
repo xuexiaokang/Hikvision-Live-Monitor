@@ -460,6 +460,7 @@ public class PlayerActivity extends AppCompatActivity {
 
         surfaceView = findViewById(R.id.surface_view);
         overlayChannel = findViewById(R.id.overlay_channel);
+        overlayStreamIndicator = findViewById(R.id.overlay_stream_indicator);
         overlayError = findViewById(R.id.overlay_error);
 
         overlayError.setText("连接中...");
