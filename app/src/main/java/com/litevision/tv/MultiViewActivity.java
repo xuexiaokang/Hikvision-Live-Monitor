@@ -637,6 +637,30 @@ public class MultiViewActivity extends AppCompatActivity {
         engines[index] = engine;
         tile.bind(channelIndex, useSubStream, engine, config.getChannelName(channelIndex));
 
+        // ★ 注册截帧回调：追踪每路成功/失败，用于预热完成后失败通道提示
+        final int slotIdxForCallback = index;
+        tile.setCaptureResultCallback(new ChannelTileView.CaptureResultCallback() {
+            @Override
+            public void onCaptureSuccess(int channelIndex) {
+                runOnUiThread(() -> {
+                    if (autoCapture) {
+                        captureSuccessCount++;
+                        Log.i(TAG, "预热成功 ch" + channelIndex + " (总成功=" + captureSuccessCount + ")");
+                    }
+                });
+            }
+            @Override
+            public void onCaptureFailure(int channelIndex, String reason) {
+                runOnUiThread(() -> {
+                    if (autoCapture) {
+                        captureFailedChannels.add(channelIndex);
+                        Log.w(TAG, "预热失败 ch" + channelIndex + " 原因=" + reason
+                                + " (累计失败=" + captureFailedChannels.size() + ")");
+                    }
+                });
+            }
+        });
+
         tile.setOnFocusChangeListener((v, hasFocus) -> {
             ChannelTileView t = (ChannelTileView) v;
             t.setFocused(hasFocus);

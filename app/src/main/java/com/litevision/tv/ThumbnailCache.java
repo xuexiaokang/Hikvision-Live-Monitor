@@ -9,7 +9,6 @@ import android.os.Looper;
 import android.util.Log;
 
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
 
 /**
@@ -87,26 +86,40 @@ public final class ThumbnailCache {
                             final SaveCallback onDone) {
         ensureIo(ctx);
         if (bitmap == null || bitmap.isRecycled()) {
+            // ★ 修复：bitmap 无效时不写文件，避免污染缓存
             if (onDone != null) mainHandler.post(() -> onDone.onResult(false));
             return;
         }
         ioHandler.post(() -> {
             boolean ok = false;
             File out = getFile(ctx, channelIndex);
-            try (FileOutputStream fos = new FileOutputStream(out)) {
-                // ★ 修复（v19）：强制等比缩放+中心裁切为 480×270（16:9）。
-                //   原因：列表格容器是固定 100dp 高度 + match_parent 宽度，ratio≈16:9。
-                //   任何非 16:9 的截图在 centerCrop 时会出现上下留白。
+            try {
+                // ★ 修复：先压缩到内存再写盘，避免写坏文件
                 Bitmap scaled = scaleToTargetFix16x9(bitmap, THUMB_WIDTH, THUMB_HEIGHT);
-                ok = scaled.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, fos);
+                java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+                ok = scaled.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, baos);
                 if (scaled != bitmap) {
                     scaled.recycle();
                 }
-                Log.i(TAG, "saved ch" + channelIndex + " ok=" + ok
-                        + " size=" + (ok ? out.length() : -1) + " bytes");
+                if (ok) {
+                    // 压缩成功才写盘
+                    java.nio.ByteBuffer buf = java.nio.ByteBuffer.wrap(baos.toByteArray());
+                    java.nio.channels.FileChannel fc = new java.io.FileOutputStream(out).getChannel();
+                    try {
+                        fc.write(buf);
+                    } finally {
+                        fc.close();
+                    }
+                    Log.i(TAG, "saved ch" + channelIndex + " ok=" + ok
+                            + " size=" + out.length() + " bytes");
+                } else {
+                    Log.w(TAG, "ch" + channelIndex + " JPEG compress failed");
+                }
             } catch (IOException e) {
                 Log.w(TAG, "save ch" + channelIndex + " failed: " + e.getMessage());
                 ok = false;
+                // ★ 修复：IO 异常时删除可能残留的坏文件
+                if (out.exists()) out.delete();
             } finally {
                 final boolean finalOk = ok;
                 if (onDone != null) {
