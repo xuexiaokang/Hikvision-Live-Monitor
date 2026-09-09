@@ -388,6 +388,10 @@ public class ChannelTileView extends FrameLayout {
         if (tvChannelName != null) {
             tvChannelName.setVisibility(show ? View.VISIBLE : View.GONE);
         }
+        // 码流标识跟随通道名同步显隐
+        if (tvStreamIndicator != null) {
+            tvStreamIndicator.setVisibility(show ? View.VISIBLE : View.GONE);
+        }
         // 通道名显示数秒后自动消失（画面内已有摄像头 OSD 标注，避免双重遮挡）。
         // 显示时重新排期，隐藏时取消排期。
         nameHandler.removeCallbacks(hideName);
