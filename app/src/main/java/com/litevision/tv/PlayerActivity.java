@@ -284,6 +284,7 @@ public class PlayerActivity extends AppCompatActivity {
 
     private final Runnable hideOverlay = () -> {
         if (overlayChannel != null) overlayChannel.setVisibility(View.GONE);
+        if (overlayStreamIndicator != null) overlayStreamIndicator.setVisibility(View.GONE);
     };
 
     private final Runnable audioStartTimeout = new Runnable() {
