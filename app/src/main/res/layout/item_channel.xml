@@ -5,7 +5,7 @@
     android:layout_height="wrap_content"
     android:orientation="vertical"
     android:background="@drawable/channel_card_normal"
-    android:layout_margin="0dp"
+    android:layout_margin="4dp"
     android:focusable="true"
     android:clickable="true">
 
