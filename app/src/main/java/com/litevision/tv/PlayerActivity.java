@@ -214,6 +214,7 @@ public class PlayerActivity extends AppCompatActivity {
     private ConfigManager config;
     private int currentChannelIndex = 0;
     private TextView overlayChannel;
+    private TextView overlayStreamIndicator;
     private TextView overlayError;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private boolean isPlaying = false;
@@ -717,6 +718,10 @@ public class PlayerActivity extends AppCompatActivity {
                         if (overlayChannel != null) {
                             overlayChannel.setText(config.getChannelName(currentChannelIndex));
                             overlayChannel.setVisibility(View.VISIBLE);
+                            if (overlayStreamIndicator != null) {
+                                overlayStreamIndicator.setText(useSubStream ? "子" : "主");
+                                overlayStreamIndicator.setVisibility(View.VISIBLE);
+                            }
                             overlayError.setVisibility(View.GONE);
                             handler.removeCallbacks(hideOverlay);
                             handler.postDelayed(hideOverlay, OVERLAY_DURATION);
@@ -726,10 +731,15 @@ public class PlayerActivity extends AppCompatActivity {
                     }
                     if (overlayChannel != null && overlayChannel.getVisibility() == View.VISIBLE) {
                         overlayChannel.setVisibility(View.GONE);
+                        if (overlayStreamIndicator != null) overlayStreamIndicator.setVisibility(View.GONE);
                         handler.removeCallbacks(hideOverlay);
                     } else {
                         overlayChannel.setText(config.getChannelName(currentChannelIndex));
                         overlayChannel.setVisibility(View.VISIBLE);
+                        if (overlayStreamIndicator != null) {
+                            overlayStreamIndicator.setText(useSubStream ? "子" : "主");
+                            overlayStreamIndicator.setVisibility(View.VISIBLE);
+                        }
                         overlayError.setVisibility(View.GONE);
                         handler.removeCallbacks(hideOverlay);
                         handler.postDelayed(hideOverlay, OVERLAY_DURATION);
@@ -1280,6 +1290,10 @@ public class PlayerActivity extends AppCompatActivity {
 
         overlayChannel.setText(name);
         overlayChannel.setVisibility(View.VISIBLE);
+        if (overlayStreamIndicator != null) {
+            overlayStreamIndicator.setText(subStream ? "子" : "主");
+            overlayStreamIndicator.setVisibility(View.VISIBLE);
+        }
         handler.removeCallbacks(hideOverlay);
         handler.postDelayed(hideOverlay, OVERLAY_DURATION);
 
@@ -1779,6 +1793,10 @@ public class PlayerActivity extends AppCompatActivity {
                             playChannel(currentChannelIndex);
                         } else {
                             overlayChannel.setVisibility(View.VISIBLE);
+                            if (overlayStreamIndicator != null) {
+                                overlayStreamIndicator.setText(useSubStream ? "子" : "主");
+                                overlayStreamIndicator.setVisibility(View.VISIBLE);
+                            }
                             handler.removeCallbacks(hideOverlay);
                             handler.postDelayed(hideOverlay, OVERLAY_DURATION);
                         }

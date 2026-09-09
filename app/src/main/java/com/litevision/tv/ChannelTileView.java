@@ -408,6 +408,10 @@ public class ChannelTileView extends FrameLayout {
         if (tvChannelName != null) {
             tvChannelName.setVisibility(View.GONE);
         }
+        // 码流标识跟随通道名一起隐藏
+        if (tvStreamIndicator != null) {
+            tvStreamIndicator.setVisibility(View.GONE);
+        }
     };
 
     public boolean isNameVisible() {
