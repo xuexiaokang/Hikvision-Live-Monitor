@@ -1246,7 +1246,7 @@ public class MultiViewActivity extends AppCompatActivity {
             }
         }
 
-        // --- MENU：短按切码流，长按返回 Main ---
+        // --- MENU：短按弹出宫格选择浮窗，长按切换子/主码流 ---
         if (code == KeyEvent.KEYCODE_MENU) {
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
                 if (event.getRepeatCount() == 0) {
@@ -1260,13 +1260,13 @@ public class MultiViewActivity extends AppCompatActivity {
                     menuKeyHandled = true;
                     long duration = System.currentTimeMillis() - menuKeyDownTime;
                     if (duration >= LONG_PRESS_MS) {
-                        // 长按 → 返回 Main（保存状态）
-                        config.setLastViewMode("multi");
-                        config.setLastMultiLayout(layoutSize);
-                        finish();
-                    } else {
-                        // 短按 → 切换子/主码流
+                        // 长按 → 切换子/主码流
                         toggleStreamType();
+                    } else {
+                        // 短按 → 弹出宫格布局选择浮窗（4/9/16）
+                        if (slots[focusedSlot] != null) {
+                            showLayoutPicker(slots[focusedSlot], 0f, 0f);
+                        }
                     }
                 }
                 return true;
