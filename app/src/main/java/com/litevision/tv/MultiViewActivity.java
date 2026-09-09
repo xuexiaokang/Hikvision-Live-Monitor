@@ -505,6 +505,9 @@ public class MultiViewActivity extends AppCompatActivity {
         lp.width = 0;
         lp.height = 0;
         lp.setGravity(Gravity.FILL);
+        // 添加 1dp margin 形成黑色分隔线（通过 GridLayout 的负间距实现）
+        int margin = (int) (1 * getResources().getDisplayMetrics().density);
+        lp.setMargins(margin, margin, margin, margin);
         grid.addView(tile, lp);
 
         // 解码模式由外部注入（引擎不持有 Context），多画面所有格子共用同一设置
