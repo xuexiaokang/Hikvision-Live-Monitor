@@ -52,8 +52,6 @@ public class ConfigManager {
     private static final String KEY_LAST_STREAM_TYPE = "last_stream_type";
     /** 上次多画面宫格大小：1 / 4 / 6 / 9 */
     private static final String KEY_LAST_MULTI_LAYOUT = "last_multi_layout";
-    /** 多画面专用子码流开关（独立于单画面 use_sub_stream，多画面默认子码流避免 9 路主码爆带宽） */
-    private static final String KEY_MULTI_USE_SUB = "multi_use_sub";
 
     // ===== 默认 NVR 占位值（用户从未配过时的占位，不是真实地址）=====
     public static final String DEFAULT_HOST = "192.168.1.23";
@@ -341,13 +339,13 @@ public class ConfigManager {
         prefs.edit().putInt(KEY_LAST_MULTI_LAYOUT, layout).commit();
     }
 
-    /** 多画面是否使用子码流（默认 true） */
+    /** 多画面是否使用子码流：统一用全局 use_sub_stream，与设置页同步。 */
     public boolean isMultiUseSub() {
-        return prefs.getBoolean(KEY_MULTI_USE_SUB, true);
+        return isUseSubStream();
     }
 
     public void setMultiUseSub(boolean useSub) {
-        prefs.edit().putBoolean(KEY_MULTI_USE_SUB, useSub).apply();
+        setUseSubStream(useSub);
     }
 
     /**
