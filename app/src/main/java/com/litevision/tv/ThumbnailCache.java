@@ -35,6 +35,8 @@ public final class ThumbnailCache {
     public static final int THUMB_WIDTH = 480;   // 列表卡片宽度的 1.5x，留点富余
     public static final int THUMB_HEIGHT = 270;  // 16:9
     private static final int JPEG_QUALITY = 80;
+    /** JPEG 有效下限：低于此值的文件视为黑帧/无效画面，不写盘。 */
+    private static final int MIN_VALID_JPEG_SIZE = 5000;
 
     /** 后台 IO 线程：写盘 / 读图解码（独立线程，避免压 libVLC 事件 / 主线程） */
     private static HandlerThread ioThread;
