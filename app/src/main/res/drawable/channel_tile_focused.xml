@@ -1,55 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 多画面格子专用聚焦态：比全局 channel_card_focused 更粗更亮的纯白主环。
-     多画面格子尺寸大，内层 tile_root(margin=8dp) 会露出外层 0~8dp 环带；
-     全局 4dp 主环在大格子上占比太小、被视频强烈对比淹没，肉眼几乎看不清，
-     故单独做这张：
-       - 主环纯白 6dp（全局 4dp），通过 inset=1dp 让白环整体落在 0~8dp 露出带内
-         （inset 1dp + stroke 6dp => 白环 1~7dp，避免被内层 8dp 起点盖掉）
-       - 外层再叠 40% / 15% 白光晕增强发光感
-     设计要点（勿改坏）：
-     1. 主环 inset=1dp 是关键：露出带 0~8dp，白环必须 ≤8dp 内，否则被内层 tile_root 遮住
-     2. 底色 #132F4C 与 channel_card_normal 一致，避免焦点切换底色跳变
-     3. minSdk 21：inset 用 left/top/right/bottom 四属性写法，禁止 android:inset -->
-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-
-    <!-- 外层光晕：15% 白，最宽最淡，贴 0dp 起点 -->
-    <item>
-        <shape android:shape="rectangle">
-            <solid android:color="#00000000" />
-            <corners android:radius="12dp" />
-            <stroke
-                android:width="3dp"
-                android:color="#26FFFFFF" />
-        </shape>
-    </item>
-
-    <!-- 中层光晕：40% 白，向内收 1dp -->
-    <item
-        android:left="1dp"
-        android:top="1dp"
-        android:right="1dp"
-        android:bottom="1dp">
-        <shape android:shape="rectangle">
-            <solid android:color="#00000000" />
-            <corners android:radius="10dp" />
-            <stroke
-                android:width="2dp"
-                android:color="#66FFFFFF" />
-        </shape>
-    </item>
-
-    <!-- 主卡片：深蓝底 + 纯白主环 6dp，inset=1dp 让白环落 1~7dp（<8dp 露出带） -->
-    <item
-        android:left="1dp"
-        android:top="1dp"
-        android:right="1dp"
-        android:bottom="1dp">
-        <shape android:shape="rectangle">
-            <solid android:color="#132F4C" />
-            <corners android:radius="8dp" />
-            <stroke
-                android:width="6dp"
-                android:color="#FFFFFFFF" />
-        </shape>
-    </item>
-</layer-list>
+<!-- 多画面格子聚焦态：深蓝底 + 纯白直角边框（无光晕层） -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#132F4C" />
+    <stroke
+        android:width="4dp"
+        android:color="#FFFFFFFF" />
+</shape>

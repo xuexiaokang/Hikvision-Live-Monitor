@@ -12,7 +12,9 @@
         android:layout_height="match_parent"
         android:columnCount="2"
         android:rowCount="2"
-        android:orientation="horizontal" />
+        android:orientation="horizontal"
+        android:horizontalSpacing="1dp"
+        android:verticalSpacing="1dp" />
 
     <!-- 顶部提示条（遥控器按键说明 / 触屏手势说明） -->
     <TextView

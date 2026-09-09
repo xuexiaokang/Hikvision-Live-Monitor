@@ -1,48 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 多画面格子专用聚焦态前景（foreground）：纯白描边环，中间透明，视频原尺寸透出。
-     foreground 叠在内容之上、不占布局空间，故白边在格子边缘形成，视频不缩小。
-     （与旧 channel_tile_focused 的区别：旧的是背景 background，中间实心 #132F4C 会盖住视频，
-      必须靠 8dp margin 露出环带 → 把视频挤小。改成前景 + 中间透明后，margin 归零、视频填满。）
-     设计要点（勿改坏）：
-     1. 中间必须透明（solid #00000000），否则前景会盖住视频 → 画面变小/变暗
-     2. 主环贴最外沿（无 inset），白边落在格子边缘
-     3. minSdk 21：inset 用 left/top/right/bottom 四属性写法，禁止 android:inset -->
-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-
-    <!-- 外层光晕：15% 白，最宽最淡，贴 0dp 起点 -->
-    <item>
-        <shape android:shape="rectangle">
-            <solid android:color="#00000000" />
-            <corners android:radius="12dp" />
-            <stroke
-                android:width="3dp"
-                android:color="#26FFFFFF" />
-        </shape>
-    </item>
-
-    <!-- 中层光晕：40% 白，向内收 1dp -->
-    <item
-        android:left="1dp"
-        android:top="1dp"
-        android:right="1dp"
-        android:bottom="1dp">
-        <shape android:shape="rectangle">
-            <solid android:color="#00000000" />
-            <corners android:radius="10dp" />
-            <stroke
-                android:width="2dp"
-                android:color="#66FFFFFF" />
-        </shape>
-    </item>
-
-    <!-- 主环：纯白 5dp，中间透明，贴最外沿 -->
-    <item>
-        <shape android:shape="rectangle">
-            <solid android:color="#00000000" />
-            <corners android:radius="8dp" />
-            <stroke
-                android:width="5dp"
-                android:color="#FFFFFFFF" />
-        </shape>
-    </item>
-</layer-list>
+<!-- 多画面格子聚焦态前景：纯白直角边框，中间透明 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#00000000" />
+    <stroke
+        android:width="4dp"
+        android:color="#FFFFFFFF" />
+</shape>
