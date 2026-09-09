@@ -31,6 +31,7 @@ public class ChannelTileView extends FrameLayout {
     private TextureView textureView;
     private TextView tvChannelName;
     private TextView tvError;
+    private TextView tvStreamIndicator;
 
     private PlayerEngine engine;
     private int channelIndex = -1;
@@ -91,6 +92,7 @@ public class ChannelTileView extends FrameLayout {
         textureView = findViewById(R.id.tile_texture);
         tvChannelName = findViewById(R.id.tile_channel_name);
         tvError = findViewById(R.id.tile_error);
+        tvStreamIndicator = findViewById(R.id.tile_stream_indicator);
 
         // 底层铺深蓝卡底（与列表页 item_channel.xml 的 channel_card_normal 一致）：
         // 当视频 aspect 与格子不完全一致（center-crop 后裁掉部分），未被视频覆盖的
@@ -296,6 +298,7 @@ public class ChannelTileView extends FrameLayout {
         tvChannelName.setText(name);
         showName(true);
         showError(null);
+        updateStreamIndicator(useSub);
         setFocused(false);
         fillApplied = false; // 换通道/复用格子，需等新帧重新收敛 fill
         // 若引擎已获知视频尺寸（复用场景），销毁后重建绑定立即校正裁剪
@@ -423,6 +426,14 @@ public class ChannelTileView extends FrameLayout {
     /** 可见性变化通知（预留：实际延迟停止由 MultiView 统一调度）。 */
     public void onVisibleChanged(boolean visible) {
         // no-op：引擎生命周期由 MultiView 的可见性队列统一管理
+    }
+
+    /** 更新码流标识（主/子）显示。 */
+    public void updateStreamIndicator(boolean useSubStream) {
+        if (tvStreamIndicator == null) return;
+        String text = useSubStream ? "子" : "主";
+        tvStreamIndicator.setText(text);
+        tvStreamIndicator.setVisibility(View.VISIBLE);
     }
 
     /**
