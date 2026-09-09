@@ -163,30 +163,59 @@ public final class ThumbnailCapture {
                     + (ctx != null ? ctx.getClass().getSimpleName() : "null") + "）");
             return;
         }
-        captureWithRetry((Activity) ctx, tv, channelIndex, 5, 1800L);
+        captureWithRetry((Activity) ctx, tv, channelIndex, 8, 1800L);
     }
 
     /**
      * 带重试的截帧。失败原因：① PixelCopy 返回失败码；② 拿到黑帧（视频还没渲染）；
      * ③ TextureView 尺寸为 0。每两次尝试之间隔 retryDelayMs，最多 attempts 次。
      *
-     * <p>成功一次即停。进度推进由调用方在"发起即计数"模式自行处理（MultiViewActivity 已做）。</p>
+     * <p>成功一次即停。回调在主线程派发（success=true 表示缩略图已成功写入磁盘缓存，
+     * success=false 表示所有重试均失败）。</p>
      */
+    public static void captureToCacheFile(final Context ctx, final TextureView tv,
+                                          final int channelIndex,
+                                          final ThumbnailCache.SaveCallback callback) {
+        if (tv == null || !(ctx instanceof Activity)) {
+            Log.w(TAG, "captureToCacheFile: 需要 Activity 宿主（ctx="
+                    + (ctx != null ? ctx.getClass().getSimpleName() : "null") + "）");
+            return;
+        }
+        captureWithRetry((Activity) ctx, tv, channelIndex, 8, 1800L, callback);
+    }
+
+    /** 无回调的重载（向后兼容），内部委托给带回调版本（忽略回调）。 */
     private static void captureWithRetry(final Activity activity, final TextureView tv,
                                         final int channelIndex,
                                         final int attempts, final long retryDelayMs) {
+        captureWithRetry(activity, tv, channelIndex, attempts, retryDelayMs, null);
+    }
+
+    /**
+     * 带回调的重试截帧核心实现。
+     */
+    private static void captureWithRetry(final Activity activity, final TextureView tv,
+                                        final int channelIndex,
+                                        final int attempts, final long retryDelayMs,
+                                        final ThumbnailCache.SaveCallback callback) {
         if (attempts <= 0) {
             Log.w(TAG, "ch" + channelIndex + " 重试次数用尽，最终失败");
+            if (callback != null) {
+                new Handler(Looper.getMainLooper()).post(() -> callback.onResult(false));
+            }
             return;
         }
         if (activity == null || activity.isFinishing() || activity.isDestroyed()) {
             Log.w(TAG, "ch" + channelIndex + " Activity 已销毁，放弃重试");
+            if (callback != null) {
+                new Handler(Looper.getMainLooper()).post(() -> callback.onResult(false));
+            }
             return;
         }
         if (tv == null || !tv.isAvailable()) {
             Log.w(TAG, "ch" + channelIndex + " tv 不可用，等 " + retryDelayMs + "ms 重试");
             new Handler(Looper.getMainLooper()).postDelayed(() ->
-                    captureWithRetry(activity, tv, channelIndex, attempts - 1, retryDelayMs),
+                    captureWithRetry(activity, tv, channelIndex, attempts - 1, retryDelayMs, callback),
                     retryDelayMs);
             return;
         }
@@ -197,13 +226,17 @@ public final class ThumbnailCapture {
                 // ★★★ 同步更新内存缓存（diskBitmapCache），让回列表页时 holder 命中内存
                 // 缓存同步出图，避免异步 decodeFile 的短暂空白窗口。
                 ThumbnailLoader.getInstance(activity).primeDiskCache(channelIndex, bitmap);
-                ThumbnailCache.save(activity, channelIndex, bitmap, success -> {
-                    if (success) {
+                ThumbnailCache.save(activity, channelIndex, bitmap, saveOk -> {
+                    if (saveOk) {
                         Log.i(TAG, "ch" + channelIndex + " 缩略图已写入缓存");
                     } else {
                         Log.w(TAG, "ch" + channelIndex + " 缩略图保存失败");
                     }
                     recycleSafe(bitmap);
+                    // 通知调用方
+                    if (callback != null) {
+                        new Handler(Looper.getMainLooper()).post(() -> callback.onResult(saveOk));
+                    }
                 });
             }
             @Override
@@ -211,7 +244,7 @@ public final class ThumbnailCapture {
                 Log.w(TAG, "ch" + channelIndex + " 截屏失败: " + reason
                         + (attempts > 1 ? "，等 " + retryDelayMs + "ms 重试 (剩余 " + (attempts - 1) + " 次)" : "，已放弃"));
                 new Handler(Looper.getMainLooper()).postDelayed(() ->
-                        captureWithRetry(activity, tv, channelIndex, attempts - 1, retryDelayMs),
+                        captureWithRetry(activity, tv, channelIndex, attempts - 1, retryDelayMs, callback),
                         retryDelayMs);
             }
         });

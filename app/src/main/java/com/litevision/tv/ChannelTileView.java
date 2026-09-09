@@ -40,6 +40,17 @@ public class ChannelTileView extends FrameLayout {
     private boolean surfaceReady = false;
     private boolean nameVisible = true;
     private boolean destroyed = false;
+    /** 截帧结果回调（由 MultiViewActivity 在预热模式下注册）。 */
+    private CaptureResultCallback captureResultCallback = null;
+
+    public interface CaptureResultCallback {
+        void onCaptureSuccess(int channelIndex);
+        void onCaptureFailure(int channelIndex, String reason);
+    }
+
+    public void setCaptureResultCallback(CaptureResultCallback cb) {
+        this.captureResultCallback = cb;
+    }
 
     /**
      * SurfaceTexture 的实际尺寸（VLC 设完 buffer geometry 后更新）。
@@ -326,12 +337,24 @@ public class ChannelTileView extends FrameLayout {
     public void captureThumbnailToCache(android.content.Context ctx) {
         if (textureView == null || !textureView.isAvailable()) {
             Log.w(TAG, "captureThumbnailToCache: tv 不可用 ch=" + channelIndex);
+            if (captureResultCallback != null) {
+                captureResultCallback.onCaptureFailure(channelIndex, "tv不可用");
+            }
             return;
         }
         Log.i(TAG, "🎬 截缩略图 ch" + channelIndex
                 + " (tile " + textureView.getWidth() + "x" + textureView.getHeight() + ")");
         // PixelCopy 需要 Activity 宿主（MultiViewActivity.this）
-        ThumbnailCapture.captureToCacheFile(ctx, textureView, channelIndex);
+        ThumbnailCapture.captureToCacheFile(ctx, textureView, channelIndex,
+                success -> {
+                    if (captureResultCallback != null) {
+                        if (success) {
+                            captureResultCallback.onCaptureSuccess(channelIndex);
+                        } else {
+                            captureResultCallback.onCaptureFailure(channelIndex, "截帧失败");
+                        }
+                    }
+                });
     }
 
     /**

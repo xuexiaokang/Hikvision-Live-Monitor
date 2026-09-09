@@ -111,10 +111,10 @@ public class MultiViewActivity extends AppCompatActivity {
     private boolean useSubStream = true; // 多画面码流（独立键 multi_use_sub）
     /** 自动预热模式（列表页"刷新缩略图"按钮触发）：强制 9 宫格 + 截帧后自动回列表。 */
     private boolean autoCapture = false;
-    /** 自动预热兜底超时（毫秒）：9 路播放 + 4s 兜底截帧 + 5 次重试（每 1.8s）。
-     *  最坏情况 9 路都慢：onPlaying → 4s 截帧 → 黑帧重试 1.8s×4 = 9s，合计约 13s。
-     *  给 25s 留足余量，避免慢通道还没走完重试就被强制 finish。 */
-    private static final long AUTO_CAPTURE_TIMEOUT_MS = 25000L;
+    /** 自动预热兜底超时（毫秒）：9 路播放 + 4s 兜底截帧 + 8 次重试（每 1.8s）。
+     *  最坏情况 9 路都慢：onPlaying → 4s 截帧 → 黑帧重试 1.8s×7 = 12.6s，合计约 17s。
+     *  给 30s 留足余量，避免慢通道还没走完重试就被强制 finish。 */
+    private static final long AUTO_CAPTURE_TIMEOUT_MS = 30000L;
     // ===== 预热进度条（"刷新缩略图"）：让用户看到 n/total 进度，避免误以为卡死而中断 =====
     private View layoutCaptureProgress;
     private android.widget.ProgressBar pbCapture;
@@ -125,6 +125,10 @@ public class MultiViewActivity extends AppCompatActivity {
     private int captureProgress = 0;
     /** 已全部完成并正在退出，避免超时回调与完成回调重复 finish。 */
     private boolean captureFinishing = false;
+    /** 预热失败通道列表（记录通道索引） */
+    private final java.util.Set<Integer> captureFailedChannels = new java.util.HashSet<>();
+    /** 预热成功通道计数 */
+    private int captureSuccessCount = 0;
 
     // ===== 宫格内嵌全屏（双击）状态 =====
     /** 当前内嵌全屏的格子索引；-1 = 普通宫格模式。格子内的 ChannelTileView 被临时移到全屏容器。 */
@@ -317,6 +321,8 @@ public class MultiViewActivity extends AppCompatActivity {
                 captureTotal = Math.max(1,
                         Math.min(layoutSize, totalCh > 0 ? totalCh : layoutSize));
                 captureProgress = 0;
+                captureSuccessCount = 0;
+                captureFailedChannels.clear();
                 if (pbCapture != null) {
                     pbCapture.setMax(captureTotal);
                     pbCapture.setProgress(0);
@@ -1695,7 +1701,8 @@ public class MultiViewActivity extends AppCompatActivity {
      * 预热模式（"刷新缩略图"）进度推进：每发起一路截帧调用一次。
      *
      * <p>发起即计数（截帧失败也算已处理），保证进度条一定能走完，不卡在半途让用户以为
-     * 死机而手动中断。全部完成后短暂停留显示"完成"，再回列表。</p>
+     * 死机而手动中断。全部完成后短暂停留显示"完成"，再回列表。
+     * 若有失败通道，在退出前 Toast 提示。</p>
      */
     private void onCaptureProgressed() {
         if (!autoCapture) return;
@@ -1714,6 +1721,21 @@ public class MultiViewActivity extends AppCompatActivity {
             captureFinishing = true;
             if (tvCaptureProgress != null) {
                 tvCaptureProgress.setText(R.string.capture_done);
+            }
+            // 显示失败通道提示
+            if (!captureFailedChannels.isEmpty()) {
+                final java.util.List<String> failedNames = new java.util.ArrayList<>();
+                for (int ch : captureFailedChannels) {
+                    String name = config.getChannelName(ch);
+                    failedNames.add(name != null ? name : "通道" + (ch + 1));
+                }
+                final String msg = "以下通道缩略图生成失败：" + String.join("、", failedNames);
+                Log.w(TAG, "预热完成但有 " + captureFailedChannels.size() + " 路失败: " + msg);
+                handler.post(() -> {
+                    if (!isFinishing() && !isDestroyed()) {
+                        Toast.makeText(MultiViewActivity.this, msg, Toast.LENGTH_LONG).show();
+                    }
+                });
             }
             // 让用户看到"完成"再返回，避免一闪而过
             handler.postDelayed(() -> {
