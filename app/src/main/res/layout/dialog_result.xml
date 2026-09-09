@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 测试结果对话框内容（SettingsActivity.showResult 用）。
+
+     ★ 为什么不用 AlertDialog 默认的 setPositiveButton：
+       Theme.MaterialComponents 下 AlertDialog 的按钮会被 inflate 成 MaterialButton，
+       它吞掉 XML android:background 与 Java setBackgroundResource() → 电视遥控器上
+       焦点**没有任何高亮**（按钮底色固定 Material 蓝 #0D47A1），用户以为"无法选中"。
+       改用本自定义 View + 全限定名 android.widget.Button，背景与焦点态完全可控，
+       与全 App 焦点方案（channel_card_focused / channel_card_normal）保持一致。 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="#0A1929"
+    android:paddingStart="24dp"
+    android:paddingEnd="24dp"
+    android:paddingTop="8dp"
+    android:paddingBottom="20dp">
+
+    <!-- 结果正文（长文本可滚动） -->
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="false">
+
+        <TextView
+            android:id="@+id/tv_result"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#FFFFFF"
+            android:textSize="14sp"
+            android:lineSpacingExtra="4dp"
+            android:textIsSelectable="true"
+            android:paddingBottom="18dp" />
+    </ScrollView>
+
+    <!-- 确定按钮：必须写全限定名 android.widget.Button（防被 MaterialButton 吞背景） -->
+    <android.widget.Button
+        android:id="@+id/btn_dialog_ok"
+        android:layout_width="wrap_content"
+        android:layout_height="56dp"
+        android:layout_gravity="center_horizontal"
+        android:text="确定"
+        android:textSize="16sp"
+        android:textColor="#CCFFFFFF"
+        android:background="@drawable/channel_card_normal"
+        android:elevation="0dp"
+        android:stateListAnimator="@null"
+        android:paddingStart="44dp"
+        android:paddingEnd="44dp"
+        android:focusable="true"
+        android:focusableInTouchMode="true" />
+
+</LinearLayout>

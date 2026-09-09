@@ -4,10 +4,12 @@
     android:id="@+id/tile_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:layout_margin="3dp"
-    android:background="@drawable/channel_card_normal"
-    android:focusable="true"
     android:clipChildren="true">
+
+    <!-- 内层 tile_root 只做内容容器，不设背景、不拿焦点，避免"外层挂监听/内层拿焦点"焦点分裂。
+         无 margin：视频填满整格，不缩小画面。
+         焦点白边改由外层 ChannelTileView 的 foreground 承担（setFocused → channel_tile_focused_fg）：
+         foreground 叠在内容之上、不占布局空间，白边在格子边缘形成，视频原尺寸透出。 -->
 
     <TextureView
         android:id="@+id/tile_texture"

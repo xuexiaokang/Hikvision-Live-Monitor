@@ -254,12 +254,14 @@ public class PlayerActivity extends AppCompatActivity {
                 @Override public void onAudioFocusChange(int focusChange) {
                     switch (focusChange) {
                         case AudioManager.AUDIOFOCUS_GAIN:
-                            Log.i(TAG, "🎧 AudioFocus: GAIN — unmuting, volume max");
+                            // ★ 修复（2026-09-08）：不再修改系统媒体音量。
+                            // 旧代码在拿到 AudioFocus 后调 setStreamVolume(STREAM_MUSIC, max) 把系统
+                            // 音量强制拉满，等于覆盖用户在系统里设的音量（用户明确要求"进入全屏
+                            // 不影响当前系统音量"）。
+                            // 这里只把**本播放器实例**的音量设为全开（实例级，不写系统设置），
+                            // 系统 STREAM_MUSIC 音量与静音状态一律保持原样。
+                            Log.i(TAG, "🎧 AudioFocus: GAIN — 仅置播放器实例音量，不修改系统音量");
                             try {
-                                if (audioManager != null) {
-                                    int max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
-                                    audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, max, 0);
-                                }
                                 if (audioAndroidMP != null) { try { audioAndroidMP.setVolume(1.0f, 1.0f); } catch (Throwable ignored) {} }
                                 if (useCombinedMode && videoMediaPlayer != null) videoMediaPlayer.setVolume(100);
                             } catch (Throwable ignored) {}
@@ -472,20 +474,20 @@ public class PlayerActivity extends AppCompatActivity {
                     audioFocusListener,
                     AudioManager.STREAM_MUSIC,
                     AudioManager.AUDIOFOCUS_GAIN);
+            // ★ 修复（2026-09-08）：进入全屏**绝不修改系统媒体音量**。
+            // 旧代码到这里会 setStreamVolume(STREAM_MUSIC, maxVol) 把系统音量强制拉满，
+            // 并用 adjustStreamVolume 强行解除静音——等于篡改用户在系统里设的音量/静音。
+            // 现改为：只**读取**当前音量用于日志（不写入），系统音量与静音状态原样保留。
+            // 有声音靠两件事保证：① 请求了 AudioFocus（解决小米盒子因 null listener 静默）；
+            // ② 播放器实例自身音量全开（实例级，不落系统设置）。
             int maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
             int curVol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
             boolean muting = audioManager.isStreamMute(AudioManager.STREAM_MUSIC);
-            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, maxVol, 0);
-            // If HDMI audio stream is marked muted (common on TV after standby), force unmute.
-            try {
-                // adjustStreamVolume flag 0 = none; ADJUST_UNMUTE = 4 (unfortunately @hide, try reflection-free direct)
-                if (muting) audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, 0, 0);
-            } catch (Throwable ignored) {}
             Log.i(TAG, "🎧 onCreate: AudioFocus result=" + focusResult
                     + " (1=AUDIOFOCUS_REQUEST_GRANTED, 0=FAILED, 2=DELAYED)"
                     + " streamMusicVol: " + curVol + "/" + maxVol
                     + " muted=" + muting
-                    + " (now forced to MAX)");
+                    + " (系统音量保持不变，不强制拉满)");
             if (focusResult != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
                 Log.w(TAG, "🎧 onCreate: AudioFocus NOT GRANTED — trying TRANSIENT_MAY_DUCK as fallback");
                 int r2 = audioManager.requestAudioFocus(audioFocusListener,
@@ -971,14 +973,16 @@ public class PlayerActivity extends AppCompatActivity {
                             if (audioManager != null) {
                                 int fr = audioManager.requestAudioFocus(audioFocusListener,
                                         AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN);
+                                // ★ 修复（2026-09-08）：只读取系统音量用于诊断，绝不写入。
+                                // 旧代码在此 setStreamVolume(STREAM_MUSIC, maxV) 把系统媒体音量
+                                // 强制拉满 + adjustStreamVolume 强制解除静音，篡改用户系统设置。
+                                // 有声音靠 AudioFocus + 播放器实例音量（见下方 vmp.setVolume）。
                                 int maxV = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
                                 int curV = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
                                 boolean muted = audioManager.isStreamMute(AudioManager.STREAM_MUSIC);
-                                if (curV != maxV) audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, maxV, 0);
-                                if (muted) try { audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, 0, 0); } catch (Throwable ignored) {}
                                 sb.append("   focusResult=").append(fr)
                                         .append(" streamMusicVol=").append(curV).append("/").append(maxV)
-                                        .append(" muted=").append(muted).append(" → forced MAX\n");
+                                        .append(" muted=").append(muted).append(" (系统音量保持不变)\n");
                             }
                             if (vmp != null && audioEnabled) {
                                 int vBefore = vmp.getVolume();
@@ -1870,11 +1874,13 @@ public class PlayerActivity extends AppCompatActivity {
             try {
                 int fr = audioManager.requestAudioFocus(audioFocusListener,
                         AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN);
+                // ★ 修复（2026-09-08）：onResume 同样不修改系统音量，只读取用于日志。
+                // 旧代码每次回前台都 setStreamVolume(STREAM_MUSIC, maxV) 强制拉满。
                 int maxV = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
-                audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, maxV, 0);
+                int curV = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
                 boolean muted = audioManager.isStreamMute(AudioManager.STREAM_MUSIC);
-                Log.i(TAG, "🎧 onResume: AudioFocus=" + fr + " (1=GRANTED), vol forced to "
-                        + maxV + ", muted=" + muted);
+                Log.i(TAG, "🎧 onResume: AudioFocus=" + fr + " (1=GRANTED), vol=" + curV
+                        + "/" + maxV + ", muted=" + muted + " (系统音量保持不变)");
             } catch (Throwable t) {
                 Log.w(TAG, "🎧 onResume audio setup error: " + t.getMessage());
             }

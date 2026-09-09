@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 多画面格子聚焦态覆盖层：50% 透明纯白描边，叠在最上层。
+     与背景 channel_tile_focused 的白色边框并存，不改变现有边框。
+     设计要点：
+     1. 中间透明，只画边框
+     2. 主环 4dp 纯白 50% 透明度（#80FFFFFF）
+     3. 圆角 8dp 与背景一致 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#00000000" />
+    <corners android:radius="8dp" />
+    <stroke
+        android:width="4dp"
+        android:color="#80FFFFFF" />
+</shape>

@@ -10,9 +10,14 @@ import android.os.Looper;
 import android.util.Log;
 import android.view.PixelCopy;
 import android.view.TextureView;
+import android.view.View;
+import android.view.ViewGroup;
+import android.view.ViewParent;
 import android.view.Window;
 
 import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * 缩略图截屏工具：用 {@link PixelCopy#request(Window, Rect, Bitmap, PixelCopy.OnPixelCopyFinishedListener, Handler)}
@@ -85,7 +90,25 @@ public final class ThumbnailCapture {
                     if (cb != null) cb.onFailure("Bitmap create failed: " + t.getMessage());
                     return;
                 }
-                PixelCopy.request(window, rect, bitmap, copyResult -> {
+                // ★ 修复（2026-09-08）：截帧前隐藏格子内所有叠加层（通道名 / 错误·缓冲提示等）。
+                //   PixelCopy(Window, rect) 读的是窗口**合成结果**，任何叠在 TextureView 之上的
+                //   UI 都会被一起截进缩略图（用户反馈"把提示文字也截取了"，手机端格子小、
+                //   文字占比大尤其明显）。这里临时 INVISIBLE 同层兄弟 View，截完立刻恢复。
+                final List<View> hiddenOverlays = hideSiblingOverlays(tv);
+                // 叠加"全局注册"的覆盖层（如多画面预热进度条）：它们贴屏可见但同样会被
+                // PixelCopy 截进缩略图，截帧瞬间一并隐藏，截完一起恢复。
+                for (View v : sHideOnCapture) {
+                    if (v != null && v.getVisibility() == View.VISIBLE) {
+                        hiddenOverlays.add(v);
+                        v.setVisibility(View.INVISIBLE);
+                    }
+                }
+
+                // 等一帧让"隐藏"真正参与合成（PixelCopy 读 SurfaceFlinger 已合成 buffer），
+                // 否则可能截到隐藏前的那一帧（仍带文字）。
+                main.post(() -> PixelCopy.request(window, rect, bitmap, copyResult -> {
+                    // 截完立刻恢复叠加层（无论成败）
+                    restoreOverlays(hiddenOverlays);
                     if (copyResult == PixelCopy.SUCCESS) {
                         // ★ 黑帧检测：PixelCopy 能 SUCCESS 但内容可能全黑（模拟器 libVLC 视频层
                         //   不参与 Window 内缓冲 → 读到空 buffer）。全黑视同失败，不写缓存，
@@ -104,7 +127,7 @@ public final class ThumbnailCapture {
                         recycleSafe(bitmap);
                         if (cb != null) cb.onFailure("PixelCopy(Window) failed: result=" + copyResult);
                     }
-                }, main);
+                }, main));
                 return;
             }
         }
@@ -126,18 +149,55 @@ public final class ThumbnailCapture {
         });
     }
 
-    /** 调用方（确保 activity 为宿主）。 */
+    /** 调用方（确保 activity 为宿主）。
+     *
+     * <p>★★★ 修复（2026-09-08）：黑帧 / PixelCopy 失败时自动重试，最多 5 次，每次间隔 1.8s。
+     * 用户反馈"刷新缩略图后还是有几个画面没有缩略图"——根因是 libVLC 首帧渲染慢于截帧窗口
+     * （实测高峰 4-8s），原 3 次重试（仅 3.6s 等待）仍不够覆盖。加到 5 次（共 9s 等待）覆盖
+     * 绝大多数首帧延迟场景；超长延迟靠预热超时（25s）兜底保证 finish 前能跑完所有重试。</p>
+     */
     public static void captureToCacheFile(final Context ctx, final TextureView tv,
                                           final int channelIndex) {
         if (tv == null || !(ctx instanceof Activity)) {
             Log.w(TAG, "captureToCacheFile: 需要 Activity 宿主（ctx="
-                    + (ctx == null ? "null" : ctx.getClass().getSimpleName()) + "）");
+                    + (ctx != null ? ctx.getClass().getSimpleName() : "null") + "）");
             return;
         }
-        capture((Activity) ctx, tv, new CaptureCallback() {
+        captureWithRetry((Activity) ctx, tv, channelIndex, 5, 1800L);
+    }
+
+    /**
+     * 带重试的截帧。失败原因：① PixelCopy 返回失败码；② 拿到黑帧（视频还没渲染）；
+     * ③ TextureView 尺寸为 0。每两次尝试之间隔 retryDelayMs，最多 attempts 次。
+     *
+     * <p>成功一次即停。进度推进由调用方在"发起即计数"模式自行处理（MultiViewActivity 已做）。</p>
+     */
+    private static void captureWithRetry(final Activity activity, final TextureView tv,
+                                        final int channelIndex,
+                                        final int attempts, final long retryDelayMs) {
+        if (attempts <= 0) {
+            Log.w(TAG, "ch" + channelIndex + " 重试次数用尽，最终失败");
+            return;
+        }
+        if (activity == null || activity.isFinishing() || activity.isDestroyed()) {
+            Log.w(TAG, "ch" + channelIndex + " Activity 已销毁，放弃重试");
+            return;
+        }
+        if (tv == null || !tv.isAvailable()) {
+            Log.w(TAG, "ch" + channelIndex + " tv 不可用，等 " + retryDelayMs + "ms 重试");
+            new Handler(Looper.getMainLooper()).postDelayed(() ->
+                    captureWithRetry(activity, tv, channelIndex, attempts - 1, retryDelayMs),
+                    retryDelayMs);
+            return;
+        }
+        Log.d(TAG, "ch" + channelIndex + " 截帧尝试 (剩余 " + attempts + " 次)");
+        capture(activity, tv, new CaptureCallback() {
             @Override
             public void onSuccess(Bitmap bitmap) {
-                ThumbnailCache.save(ctx, channelIndex, bitmap, success -> {
+                // ★★★ 同步更新内存缓存（diskBitmapCache），让回列表页时 holder 命中内存
+                // 缓存同步出图，避免异步 decodeFile 的短暂空白窗口。
+                ThumbnailLoader.getInstance(activity).primeDiskCache(channelIndex, bitmap);
+                ThumbnailCache.save(activity, channelIndex, bitmap, success -> {
                     if (success) {
                         Log.i(TAG, "ch" + channelIndex + " 缩略图已写入缓存");
                     } else {
@@ -148,7 +208,11 @@ public final class ThumbnailCapture {
             }
             @Override
             public void onFailure(String reason) {
-                Log.w(TAG, "ch" + channelIndex + " 截屏失败: " + reason);
+                Log.w(TAG, "ch" + channelIndex + " 截屏失败: " + reason
+                        + (attempts > 1 ? "，等 " + retryDelayMs + "ms 重试 (剩余 " + (attempts - 1) + " 次)" : "，已放弃"));
+                new Handler(Looper.getMainLooper()).postDelayed(() ->
+                        captureWithRetry(activity, tv, channelIndex, attempts - 1, retryDelayMs),
+                        retryDelayMs);
             }
         });
     }
@@ -156,6 +220,69 @@ public final class ThumbnailCapture {
     private static void recycleSafe(Bitmap bm) {
         if (bm != null && !bm.isRecycled()) {
             bm.recycle();
+        }
+    }
+
+    /**
+     * 截帧时需要临时隐藏的"全局覆盖层"注册表。
+     *
+     * <p>场景：多画面预热（列表页"刷新缩略图"）会在屏幕顶部显示进度条，用户需要看到
+     * 进度以免手动中断；但它是窗口内的覆盖层，会被 PixelCopy 一起截进缩略图。
+     * 由 MultiViewActivity 用 {@link #addHideOnCapture(View)} 注册，本类在每次截帧瞬间
+     * 自动隐藏它们、截完恢复——做到"看得见进度，又不污染缩略图"。</p>
+     */
+    private static final List<View> sHideOnCapture = new ArrayList<>();
+
+    /** 注册：截帧瞬间临时隐藏该 View（页面销毁务必 {@link #removeHideOnCapture}）。 */
+    public static void addHideOnCapture(View v) {
+        if (v != null && !sHideOnCapture.contains(v)) {
+            sHideOnCapture.add(v);
+        }
+    }
+
+    /** 注销：页面销毁时调用，避免持有已销毁 Activity 的 View。 */
+    public static void removeHideOnCapture(View v) {
+        if (v != null) sHideOnCapture.remove(v);
+    }
+
+    /**
+     * 临时隐藏与 tv 同层（同一父容器）的其他可见子 View。
+     *
+     * <p>用途：PixelCopy(Window) 读的是窗口合成结果，格子里叠在 TextureView 之上的
+     * 通道名 / 错误提示会被一起截进缩略图。截帧前把这些兄弟 View 设为 INVISIBLE
+     * （保留布局占位，不触发 relayout，避免影响视频布局），截完用
+     * {@link #restoreOverlays(List)} 恢复。</p>
+     *
+     * @return 被隐藏的 View 列表（供恢复用）
+     */
+    private static List<View> hideSiblingOverlays(View tv) {
+        List<View> hidden = new ArrayList<>();
+        if (tv == null) return hidden;
+        ViewParent p = tv.getParent();
+        if (!(p instanceof ViewGroup)) return hidden;
+        ViewGroup vg = (ViewGroup) p;
+        try {
+            for (int i = 0; i < vg.getChildCount(); i++) {
+                View child = vg.getChildAt(i);
+                if (child == null || child == tv) continue;
+                if (child.getVisibility() == View.VISIBLE) {
+                    hidden.add(child);
+                    child.setVisibility(View.INVISIBLE);
+                }
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "hideSiblingOverlays 异常: " + t.getMessage());
+        }
+        return hidden;
+    }
+
+    /** 恢复 {@link #hideSiblingOverlays(View)} 隐藏的 View。 */
+    private static void restoreOverlays(List<View> hidden) {
+        if (hidden == null) return;
+        for (View v : hidden) {
+            try {
+                if (v != null) v.setVisibility(View.VISIBLE);
+            } catch (Throwable ignored) {}
         }
     }
 

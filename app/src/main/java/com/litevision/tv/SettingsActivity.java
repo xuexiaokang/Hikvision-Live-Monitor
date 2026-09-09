@@ -330,22 +330,33 @@ public class SettingsActivity extends AppCompatActivity {
     }
 
     private void showResult(String title, String message) {
-        // Use a TextView in AlertDialog for scrollable text
-        TextView tv = new TextView(this);
+        // ★ 修复（2026-09-08）：电视遥控器选中不了"确定"。
+        // 旧实现用 AlertDialog 默认 setPositiveButton —— 在 Theme.MaterialComponents 下
+        // 该按钮被 inflate 成 MaterialButton，它吞掉 android:background 与
+        // setBackgroundResource()，导致遥控器聚焦时**没有任何高亮**（底色固定
+        // Material 蓝 #0D47A1），看起来像"无法选中"。
+        // 改为自定义 View（dialog_result.xml）：全限定名 android.widget.Button +
+        // 全 App 统一焦点 drawable（channel_card_focused / channel_card_normal），
+        // 并在 show 后主动 requestFocus，遥控器开箱即用。
+        View content = getLayoutInflater().inflate(R.layout.dialog_result, null);
+        TextView tv = content.findViewById(R.id.tv_result);
         tv.setText(message);
-        tv.setTextSize(12);
-        tv.setPadding(40, 30, 40, 30);
         tv.setTextIsSelectable(true);
 
-        // Make it scrollable
-        android.widget.ScrollView scrollView = new android.widget.ScrollView(this);
-        scrollView.addView(tv);
-
-        new AlertDialog.Builder(this)
+        AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle(title)
-                .setView(scrollView)
-                .setPositiveButton("确定", null)
-                .show();
+                .setView(content)
+                .create();
+
+        android.widget.Button btnOk = content.findViewById(R.id.btn_dialog_ok);
+        btnOk.setOnFocusChangeListener((v, hasFocus) ->
+                v.setBackgroundResource(hasFocus ? R.drawable.channel_card_focused
+                        : R.drawable.channel_card_normal));
+        btnOk.setOnClickListener(v -> dialog.dismiss());
+
+        dialog.show();
+        // show() 之后再请求焦点，确保窗口/decor 已就绪，焦点才真正落上（TV 遥控立即可按）
+        btnOk.post(() -> btnOk.requestFocus());
     }
 
     @Override

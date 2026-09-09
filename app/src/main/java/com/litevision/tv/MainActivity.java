@@ -15,6 +15,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -42,7 +43,19 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         progressBar = findViewById(R.id.progress_bar);
         tvStatus = findViewById(R.id.tv_status);
 
-        int spanCount = 3;
+        // ===== 列数自适应（手机/TV/平板分档，避免窄屏 3 列过密或宽屏 2 列过疏）=====
+        // 基准：< 600dp (phone 竖屏) → 2 列；600-900dp (phone 横屏/小平板) → 3 列；>= 900dp (TV/平板) → 4 列。
+        // 之前硬编码 3 列，手机端 (smallestScreenWidthDp ~ 360) 3 列导致格子过密、内容挤压。
+        int swDp = getResources().getConfiguration().smallestScreenWidthDp;
+        int spanCount;
+        if (swDp >= 900) {
+            spanCount = 4;
+        } else if (swDp >= 600) {
+            spanCount = 3;
+        } else {
+            spanCount = 2;
+        }
+        Log.i("MainActivity", "通道列表列数: " + spanCount + " (smallestScreenWidthDp=" + swDp + ")");
         GridLayoutManager layoutManager = new GridLayoutManager(this, spanCount);
         recyclerView.setLayoutManager(layoutManager);
 
@@ -144,15 +157,18 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
     private void loadChannels() {
         // Show cached names first
         List<String> cached = config.getChannelNames();
-        if (!cached.isEmpty()) {
-            adapter.setChannelNames(cached);
-            recyclerView.setVisibility(View.VISIBLE);
-            tvStatus.setVisibility(View.GONE);
-        } else {
-            recyclerView.setVisibility(View.GONE);
+        if (cached.isEmpty()) {
+            // ★ 手机端兜底（2026-09-08 修复）：即使无缓存也先显示 9 个 "通道 X" 占位，
+            // list 结构立刻可见，避免 RecyclerView GONE 留下黑底 FrameLayout（被用户
+            // 误判为 "列表无法显示"）。ISAPI 成功后再用真实通道名覆盖。
+            adapter.setChannelNames(defaultChannelNames(9));
             progressBar.setVisibility(View.VISIBLE);
-            tvStatus.setVisibility(View.VISIBLE);
             tvStatus.setText("正在连接录像机...");
+            tvStatus.setVisibility(View.VISIBLE);
+        } else {
+            adapter.setChannelNames(cached);
+            progressBar.setVisibility(View.GONE);
+            tvStatus.setVisibility(View.GONE);
         }
 
         // Fetch latest from NVR
@@ -162,7 +178,6 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
                 runOnUiThread(() -> {
                     progressBar.setVisibility(View.GONE);
                     tvStatus.setVisibility(View.GONE);
-                    recyclerView.setVisibility(View.VISIBLE);
                     adapter.setChannelNames(names);
                     // Focus first item
                     recyclerView.post(() -> {
@@ -179,11 +194,12 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
             @Override
             public void onError(String message) {
                 runOnUiThread(() -> {
+                    progressBar.setVisibility(View.GONE);
                     if (config.getChannelCount() == 0) {
-                        progressBar.setVisibility(View.GONE);
-                        tvStatus.setText("无法连接录像机\n\n" + message + "\n\n请按菜单键进入设置");
+                        // ★ 保留占位列表（用户至少看到 list 结构），只覆盖状态文字 + Toast
+                        tvStatus.setText("无法连接录像机\n\n" + message
+                                + "\n\n请按菜单键进入设置，或下拉刷新");
                         tvStatus.setVisibility(View.VISIBLE);
-                        recyclerView.setVisibility(View.GONE);
                     } else {
                         // Has cached data, just show toast
                         Toast.makeText(MainActivity.this, "刷新通道列表失败: " + message, Toast.LENGTH_SHORT).show();
@@ -191,6 +207,21 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
                 });
             }
         });
+    }
+
+    /**
+     * 生成 N 个 "通道 X" 占位名。
+     *
+     * <p>手机端（典型 smallestScreenWidthDp=360）首次启动时 NVR 不可达 → cached 空 →
+     * 旧逻辑会 {@code recyclerView.setVisibility(View.GONE)}，黑底 FrameLayout 直接露出
+     * 被误判为 "列表无法显示"。这里兜底 9 个占位让 list 永远可见。</p>
+     */
+    private static List<String> defaultChannelNames(int count) {
+        List<String> list = new ArrayList<>(count);
+        for (int i = 1; i <= count; i++) {
+            list.add("通道" + i);
+        }
+        return list;
     }
 
     @Override

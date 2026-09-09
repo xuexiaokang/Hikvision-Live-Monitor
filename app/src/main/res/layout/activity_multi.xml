@@ -30,6 +30,44 @@
         android:textSize="12sp"
         android:visibility="gone" />
 
+    <!-- ===== 自动生成缩略图进度条（列表页"刷新缩略图"进入的预热模式才显示）=====
+         作用：让用户看到 3/9 的进度，避免以为卡死而手动中断（15s 超时/全部完成后自动回列表）。
+         ★ 关键：它是窗口内的覆盖层，会被 PixelCopy(Window) 截进缩略图。因此 MultiViewActivity
+           会把它注册到 ThumbnailCapture.addHideOnCapture()，每次截帧瞬间自动隐藏、截完恢复，
+           保证进度条看得见但不会被截进图里。 -->
+    <LinearLayout
+        android:id="@+id/layout_capture_progress"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|center_horizontal"
+        android:layout_marginTop="12dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="#CC000000"
+        android:paddingStart="20dp"
+        android:paddingTop="10dp"
+        android:paddingEnd="20dp"
+        android:paddingBottom="10dp"
+        android:visibility="gone">
+
+        <ProgressBar
+            android:id="@+id/pb_capture"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="180dp"
+            android:layout_height="8dp"
+            android:max="9"
+            android:progress="0" />
+
+        <TextView
+            android:id="@+id/tv_capture_progress"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="14dp"
+            android:text="正在生成缩略图… 0/9"
+            android:textColor="#FFFFFF"
+            android:textSize="15sp" />
+    </LinearLayout>
+
     <!-- 全屏容器：宫格层之上、翻页栏之下。双击某个宫格后，把该格的 ChannelTileView
          临时移到此处铺满（引擎不停/不重启，只靠 onSizeChanged 自动重新铺满）；再次双击返回宫格。 -->
     <FrameLayout

@@ -1,13 +1,19 @@
 package com.litevision.tv;
 
 import android.content.Context;
+import android.graphics.Canvas;
 import android.graphics.Matrix;
+import android.graphics.Outline;
+import android.graphics.Path;
+import android.graphics.RectF;
 import android.graphics.SurfaceTexture;
+import android.graphics.drawable.Drawable;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.Surface;
 import android.view.TextureView;
+import android.view.Gravity;
 import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.TextView;
@@ -86,9 +92,29 @@ public class ChannelTileView extends FrameLayout {
         tvChannelName = findViewById(R.id.tile_channel_name);
         tvError = findViewById(R.id.tile_error);
 
-        // 底层铺黑：当视频 aspect 与格子不完全一致（center-crop 后会裁掉部分），
-        // 未被视频覆盖的边缘必须显示纯黑而不是透出脏 buffer，避免底部花屏残留。
-        setBackgroundColor(0xFF000000);
+        // 底层铺深蓝卡底（与列表页 item_channel.xml 的 channel_card_normal 一致）：
+        // 当视频 aspect 与格子不完全一致（center-crop 后裁掉部分），未被视频覆盖的
+        // 边缘显示深蓝而非透出脏 buffer，避免底部花屏残留。中心区域被子 View（透明
+        // tile_root + 视频 TextureView）覆盖，此深蓝只是底色。
+        setBackgroundResource(R.drawable.channel_card_normal);
+
+        // ★ 焦点高亮由外层接管（与列表页 item_channel.xml 外层 focusable + 监听一致）：
+        //   外层 ChannelTileView 必须可聚焦，D-pad 焦点才落在这里，onFocusChangeListener
+        //   才能触发 setFocused() → channel_tile_focused 白光背景。否则内层 tile_root 拿焦点，
+        //   外层监听失联、白光永不显示（TV 遥控左右无白边高亮的根因）。
+        // ★ 白边用 padding 而非 margin：外层设 4dp padding，白环显示在 padding 区，
+        //   视频仍填满内部无缩小（margin 方案会把格子整体缩小）。
+        // ★ 圆角裁剪：用 OutlineProvider + setClipToOutline 让视频内容遵守 8dp 圆角，
+        //   而不是在 draw() 里手动 clipPath（Android 不会把裁剪传递给子 View）。
+        setOutlineProvider(new android.view.ViewOutlineProvider() {
+            @Override
+            public void getOutline(View v, Outline outline) {
+                outline.setRoundRect(0, 0, v.getWidth(), v.getHeight(), dpToPx(8));
+            }
+        });
+        setClipToOutline(true);
+        setFocusable(true);
+        setClickable(false);
 
         textureView.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
             @Override
@@ -425,12 +451,22 @@ public class ChannelTileView extends FrameLayout {
         showError(null);
     }
 
-    /** 焦点变化高亮。 */
+    /** 焦点变化高亮：背景替换 + 前景半透明白色覆盖框（叠在最上层，不改变现有边框）。 */
     public void setFocused(boolean focused) {
         if (focused) {
-            setBackgroundResource(R.drawable.channel_card_focused);
+            setBackgroundResource(R.drawable.channel_tile_focused);
+            setForeground(getDrawable(R.drawable.channel_tile_focused_overlay));
         } else {
             setBackgroundResource(R.drawable.channel_card_normal);
+            setForeground(null);
         }
+    }
+
+    private Drawable getDrawable(int resId) {
+        return getContext().getResources().getDrawable(resId);
+    }
+
+    private int dpToPx(int dp) {
+        return Math.round(dp * getContext().getResources().getDisplayMetrics().density);
     }
 }
