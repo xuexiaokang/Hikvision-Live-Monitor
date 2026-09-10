@@ -514,22 +514,8 @@ public class MultiViewActivity extends AppCompatActivity {
         lp.width = 0;
         lp.height = 0;
         lp.setGravity(Gravity.FILL);
-        // 动态分隔线宽度：根据宫格数量调整（16宫格格子小，需要更宽的分隔线）
-        int gridCols = gridDimension(layoutSize)[1];
-        int cellCount = Math.min(layoutSize, 16);
-        float marginDp;
-        if (cellCount == 16) {
-            marginDp = 3.0f; // 16宫格：3dp分隔线
-        } else if (cellCount == 9) {
-            marginDp = 2.5f; // 9宫格：2.5dp分隔线
-        } else if (cellCount == 6) {
-            marginDp = 3.0f; // 6宫格：3dp分隔线
-        } else if (cellCount == 4) {
-            marginDp = 4.0f; // 4宫格：4dp分隔线
-        } else {
-            marginDp = 2.0f; // 默认
-        }
-        int margin = (int) (marginDp * getResources().getDisplayMetrics().density);
+        // 统一 1.5dp 分隔线（grid背景深色时自然形成）
+        int margin = (int) (1.5f * getResources().getDisplayMetrics().density);
         lp.setMargins(margin, margin, margin, margin);
         grid.addView(tile, lp);
 
