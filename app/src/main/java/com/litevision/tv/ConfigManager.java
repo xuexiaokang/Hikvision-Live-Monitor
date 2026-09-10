@@ -324,10 +324,10 @@ public class ConfigManager {
         prefs.edit().putString(KEY_LAST_STREAM_TYPE, streamType).apply();
     }
 
-    /** 上次多画面宫格大小：1 / 4 / 6 / 9 */
+    /** 上次多画面宫格大小：1 / 4 / 6 / 9 / 16 */
     public int getLastMultiLayout() {
         int layout = prefs.getInt(KEY_LAST_MULTI_LAYOUT, 4);
-        if (layout != 1 && layout != 4 && layout != 6 && layout != 9) {
+        if (layout != 1 && layout != 4 && layout != 6 && layout != 9 && layout != 16) {
             return 4;
         }
         return layout;
