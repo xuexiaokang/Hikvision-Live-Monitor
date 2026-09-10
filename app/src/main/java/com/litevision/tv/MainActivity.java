@@ -43,18 +43,10 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         progressBar = findViewById(R.id.progress_bar);
         tvStatus = findViewById(R.id.tv_status);
 
-        // ===== 列数自适应（手机/TV/平板分档，避免窄屏 3 列过密或宽屏 2 列过疏）=====
-        // 基准：< 600dp (phone 竖屏) → 2 列；600-900dp (phone 横屏/小平板) → 3 列；>= 900dp (TV/平板) → 4 列。
-        // 之前硬编码 3 列，手机端 (smallestScreenWidthDp ~ 360) 3 列导致格子过密、内容挤压。
+        // ===== 列数自适应：默认 3 列，小屏缩减为 2 列，大屏保持 3 列 =====
+        // 基准：smallestScreenWidthDp < 480 (手机窄屏) → 2 列；>= 480 (手机宽屏/平板/TV) → 3 列。
         int swDp = getResources().getConfiguration().smallestScreenWidthDp;
-        int spanCount;
-        if (swDp >= 900) {
-            spanCount = 4;
-        } else if (swDp >= 600) {
-            spanCount = 3;
-        } else {
-            spanCount = 2;
-        }
+        int spanCount = (swDp < 480) ? 2 : 3;
         Log.i("MainActivity", "通道列表列数: " + spanCount + " (smallestScreenWidthDp=" + swDp + ")");
         GridLayoutManager layoutManager = new GridLayoutManager(this, spanCount);
         recyclerView.setLayoutManager(layoutManager);
