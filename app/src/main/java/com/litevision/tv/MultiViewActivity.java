@@ -472,6 +472,8 @@ public class MultiViewActivity extends AppCompatActivity {
         // 连带着删掉且引擎未释放，留下悬空引用（releaseAllSlots 之后 slots[i] 已为 null）。
         exitFullScreen();
         grid.removeAllViews();
+        // 设置 grid 背景为深蓝色，形成分隔线视觉效果
+        grid.setBackgroundColor(0xFF0B1A26);
         int[] dim = gridDimension(layout);
         grid.setColumnCount(dim[1]);
         grid.setRowCount(dim[0]);
