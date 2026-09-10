@@ -56,6 +56,18 @@ public class SettingsActivity extends AppCompatActivity {
         rbDecodeAuto = findViewById(R.id.rb_decode_auto);
         tvDecodeModeDesc = findViewById(R.id.tv_decode_mode_desc);
 
+        // ★ 显示版本号到设置页底部
+        TextView tvVersion = findViewById(R.id.tv_version);
+        if (tvVersion != null) {
+            try {
+                String versionName = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+                int versionCode = getPackageManager().getPackageInfo(getPackageName(), 0).versionCode;
+                tvVersion.setText("版本 v" + versionName + " (build " + versionCode + ")");
+            } catch (Exception e) {
+                tvVersion.setText("版本检测失败");
+            }
+        }
+
         // Load current config
         etHost.setText(config.getHost());
         etPort.setText(String.valueOf(config.getRtspPort()));

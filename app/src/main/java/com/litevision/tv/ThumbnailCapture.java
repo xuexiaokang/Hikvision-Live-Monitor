@@ -223,12 +223,9 @@ public final class ThumbnailCapture {
         capture(activity, tv, new CaptureCallback() {
             @Override
             public void onSuccess(Bitmap bitmap) {
-                // ★★★ 同步更新内存缓存（diskBitmapCache），让回列表页时 holder 命中内存
-                // 缓存同步出图，避免异步 decodeFile 的短暂空白窗口。
-                ThumbnailLoader.getInstance(activity).primeDiskCache(channelIndex, bitmap);
-                // ★ 先检测黑帧，再决定是否重试（避免黑帧写入缓存污染缩略图）
+                // ★ 先检测黑帧，再决定是否写缓存——避免黑帧污染 diskBitmapCache
                 if (isMostlyBlack(bitmap)) {
-                    long blackRetryDelay = retryDelayMs * 2; // 黑帧时加倍等待，给慢通道更多起播时间
+                    long blackRetryDelay = retryDelayMs * 2; // 黑帧时加倍等待
                     Log.w(TAG, "ch" + channelIndex + " 检测到黑帧，等 " + blackRetryDelay + "ms 重试 (剩余 " + (attempts - 1) + " 次)");
                     recycleSafe(bitmap);
                     new Handler(Looper.getMainLooper()).postDelayed(() ->
@@ -236,6 +233,8 @@ public final class ThumbnailCapture {
                             blackRetryDelay);
                     return;
                 }
+                // ★★★ 非黑帧才同步更新内存缓存（diskBitmapCache），让回列表页时 holder 命中内存
+                ThumbnailLoader.getInstance(activity).primeDiskCache(channelIndex, bitmap);
                 ThumbnailCache.save(activity, channelIndex, bitmap, saveOk -> {
                     if (saveOk) {
                         Log.i(TAG, "ch" + channelIndex + " 缩略图已写入缓存");

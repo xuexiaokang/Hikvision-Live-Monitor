@@ -351,6 +351,10 @@ public class ChannelTileView extends FrameLayout {
                         if (success) {
                             captureResultCallback.onCaptureSuccess(channelIndex);
                         } else {
+                            // ★ 修复：清除 diskBitmapCache 中的脏数据（黑帧被 save() 丢弃
+                            // 时 primeDiskCache 已提前写入）。否则下次 bind 直接命中同步出图，
+                            // 格子就永远显示那帧黑屏/蓝块。
+                            ThumbnailLoader.diskBitmapCache.remove(channelIndex);
                             captureResultCallback.onCaptureFailure(channelIndex, "截帧失败");
                         }
                     }

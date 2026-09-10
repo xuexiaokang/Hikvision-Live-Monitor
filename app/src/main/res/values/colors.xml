@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="deep_blue_primary">#0D47A1</color>
-    <color name="bg_dark">#0A1929</color>
-    <color name="bg_card">#132F4C</color>
-    <color name="text_primary">#FFFFFF</color>
-    <color name="text_secondary">#CCFFFFFF</color>
-    <color name="text_hint">#666680</color>
+    <color name="deep_blue_primary">#00C9DB</color>
+    <color name="deep_blue_light">#00E5F2</color>
+    <color name="bg_dark">#050D14</color>
+    <color name="bg_card">#0B1A26</color>
+    <color name="text_primary">#F0F6FC</color>
+    <color name="text_secondary">#A8C4D9</color>
+    <color name="text_hint">#4A6B7A</color>
     <color name="black">#000000</color>
+    <color name="card_highlight">#162A3A</color>
 </resources>

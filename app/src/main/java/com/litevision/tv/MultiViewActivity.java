@@ -524,6 +524,7 @@ public class MultiViewActivity extends AppCompatActivity {
             @Override
             public void onPlaying(int ch) {
                 runOnUiThread(() -> {
+                    Log.i(TAG, "onPlaying ch=" + ch + " slot=" + index + " slotThumbCaptured=" + slotThumbCaptured[index] + " autoCapture=" + autoCapture);
                     if (index >= 0 && index < MAX_SLOTS && slotActive[index] && slots[index] != null) {
                         startedSlots.add(index);
                         slots[index].showError(null);
@@ -549,21 +550,23 @@ public class MultiViewActivity extends AppCompatActivity {
                                         return;
                                     }
                                     if (slotThumbCaptured[slotIndex]) {
+                                        Log.i(TAG, "onPlaying-runnable: ch" + finalChannelIndex + " slot" + slotIndex + " 已被拦截(slotThumbCaptured=true)");
                                         return;
                                     }
                                     if (slotIndex < 0 || slotIndex >= MAX_SLOTS
                                             || slots[slotIndex] == null
                                             || !slotActive[slotIndex]) {
+                                        Log.i(TAG, "onPlaying-runnable: ch" + finalChannelIndex + " slot" + slotIndex + " 已被拦截(无效槽位)");
                                         return;
                                     }
-                                    slotThumbCaptured[slotIndex] = true;
+                                    Log.i(TAG, "onPlaying-runnable: ch" + finalChannelIndex + " slot" + slotIndex + " 开始截帧");
+                                    // ★ 不在此处设置 slotThumbCaptured，等 save 成功回调再设置
                                     slots[slotIndex].captureThumbnailToCache(MultiViewActivity.this);
-                                    // 预热模式：推进进度条（发起即计数，失败也算已处理，保证进度走完）
-                                    onCaptureProgressed();
                                 }
                             };
                             slotThumbRunnable[slotIndex] = r;
                             handler.postDelayed(r, THUMB_CAPTURE_DELAY_MS);
+                            Log.i(TAG, "onPlaying-runnable: ch" + ch + " slot" + index + " 已排期(延迟" + THUMB_CAPTURE_DELAY_MS + "ms)");
                         }
                     }
                 });
@@ -604,6 +607,7 @@ public class MultiViewActivity extends AppCompatActivity {
                 // VLC 真实视频尺寸/SAR 更新（可能晚于 Playing）：重算本格 center-crop，
                 // 避免 transform 停留在旧比例导致底部脏带残留（"摄像头不统一"异构码流场景）。
                 runOnUiThread(() -> {
+                    Log.i(TAG, "onVideoSizeChanged ch=" + ch + " slot=" + index + " slotThumbCaptured=" + slotThumbCaptured[index]);
                     if (index >= 0 && index < MAX_SLOTS && slots[index] != null) {
                         slots[index].applyCropIfNeeded();
                         slotVideoSizeChanged[index] = true;
@@ -618,18 +622,23 @@ public class MultiViewActivity extends AppCompatActivity {
                                 @Override
                                 public void run() {
                                     if (isFinishing() || isDestroyed()) return;
-                                    if (slotThumbCaptured[slotIndex]) return;
+                                    if (slotThumbCaptured[slotIndex]) {
+                                        Log.i(TAG, "onVideoSizeChanged-runnable: ch 被拦截(slotThumbCaptured=true)");
+                                        return;
+                                    }
                                     if (slotIndex < 0 || slotIndex >= MAX_SLOTS
                                             || slots[slotIndex] == null
                                             || !slotActive[slotIndex]) return;
+                                    Log.i(TAG, "onVideoSizeChanged-runnable: 开始截帧");
                                     slotThumbCaptured[slotIndex] = true;
                                     slots[slotIndex].captureThumbnailToCache(MultiViewActivity.this);
-                                    onCaptureProgressed();
+                                    // 注意：onCaptureProgressed() 在 onCaptureSuccess() 回调中调用，避免重复计数
                                 }
                             };
                             slotThumbRunnable[slotIndex] = r;
-                            // 首帧渲染后再等 800ms 让画面完全稳定
-                            handler.postDelayed(r, 800L);
+                            // 首帧渲染后再等 2s 让画面完全稳定，避免截到黑帧/花屏
+                            handler.postDelayed(r, 2000L);
+                            Log.i(TAG, "onVideoSizeChanged-runnable: 已排期 ch=" + ch + " slot=" + slotIndex + " 延迟2000ms");
                         }
                     }
                 });
@@ -649,7 +658,15 @@ public class MultiViewActivity extends AppCompatActivity {
                 runOnUiThread(() -> {
                     if (autoCapture) {
                         captureSuccessCount++;
-                        Log.i(TAG, "预热成功 ch" + channelIndex + " (总成功=" + captureSuccessCount + ")");
+                        // ★ 修复：真正成功后才标记，保证失败可重试
+                        int slotIdx = indexOfSlotByChannel(channelIndex);
+                        if (slotIdx >= 0) {
+                            slotThumbCaptured[slotIdx] = true;
+                        }
+                        // ★ 修复：成功后移除失败记录（防止重试后成功仍被计入失败）
+                        captureFailedChannels.remove(channelIndex);
+                        onCaptureProgressed();
+                        Log.i(TAG, "预热成功 ch" + channelIndex + " (总成功=" + captureSuccessCount + ", 剩余失败=" + captureFailedChannels.size() + ")");
                     }
                 });
             }
@@ -703,6 +720,16 @@ public class MultiViewActivity extends AppCompatActivity {
         if (tile == null) return -1;
         for (int i = 0; i < MAX_SLOTS; i++) {
             if (slots[i] == tile) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /** 通过通道索引反查槽位索引。 */
+    private int indexOfSlotByChannel(int channelIndex) {
+        for (int i = 0; i < MAX_SLOTS; i++) {
+            if (slots[i] != null && slots[i].getChannelIndex() == channelIndex) {
                 return i;
             }
         }
