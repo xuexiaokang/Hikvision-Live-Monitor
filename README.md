@@ -33,7 +33,17 @@
 
 ## 🚀 快速开始
 
-### 构建 APK
+### 下载发行版（APK）
+
+最新正式版位于仓库 `release/` 目录，字节级由 git 校验保证：
+
+- **APK**: `release/HikvisionLiveMonitor-v1.2.apk`（81.5 MB）
+- **SHA256**: `76764ec85a388c026d6554bf6263a59ec235cf1a3fa178e726dc1f6b70abccd3`
+- 直接下载: <https://raw.githubusercontent.com/xuexiaokang/Hikvision-Live-Monitor/main/release/HikvisionLiveMonitor-v1.2.apk>
+
+> 下载后建议用 SHA256 校验文件完整性。
+
+### 自行构建 APK
 
 ```bash
 # JDK 17 必须（本机示例，替换为自己的 JDK17 路径）
