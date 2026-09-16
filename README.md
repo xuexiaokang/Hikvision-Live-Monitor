@@ -1,4 +1,4 @@
-# LiteVisionTV 监控直播
+# Hikvision Live Monitor（海康监控直播）
 
 基于 **libVLC 3.5.1** 的 Android 多通道 NVR 监控直播客户端，支持单画面播放、4/9/16 宫格多画面预览、缩略图预取与遥控器/触屏双操作。
 

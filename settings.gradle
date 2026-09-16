@@ -17,5 +17,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "LiteVisionTV"
+rootProject.name = "HikvisionLiveMonitor"
 include ':app'
