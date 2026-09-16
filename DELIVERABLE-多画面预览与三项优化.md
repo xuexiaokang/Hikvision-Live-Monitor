@@ -19,7 +19,7 @@
 - 路径：`app/build/outputs/apk/debug/监控直播.apk`
 - 大小：92,090,521 字节
 - SHA256：`f1f8c5f5012049665247e55f115421423ec00973814a7e80bd530a29f078d097`
-- 构建：JDK17（`C:\Users\XXK\.workbuddy\jdks\jdk-17.0.20.1+1`）+ Gradle 8.14，`BUILD SUCCESSFUL`
+- 构建：JDK 17 + Gradle 8.14，`BUILD SUCCESSFUL`
 
 ---
 
@@ -160,7 +160,7 @@ adb logcat -s ChannelTileView | grep "video-fit"
 ## 第十一轮（同日追加）：真机截图「画面没铺满窗口」→ cover 变换对某些格子没生效
 
 ### 用户反馈（真机截图）
-4 宫格中**右上「大门口」**画面缩在格子左上角，其余是**深蓝底**（`#132F4C` = `channel_card_normal` 卡底颜色），其余三格正常铺满。
+4 宫格中**右上某通道**画面缩在格子左上角，其余是**深蓝底**（`#132F4C` = `channel_card_normal` 卡底颜色），其余三格正常铺满。
 
 ### 根因（三步排除）
 1. **蓝底不是宫格底**：`activity_multi.xml` 宫格底是 `#000000`；蓝来自 `item_tile_channel.xml` 的 `channel_card_normal`（`#132F4C`）。
@@ -242,7 +242,7 @@ padding 行（buffer y 360–368）映射到 view y 298.5–305.25，**只有前
 ## 第十三轮（同日）：cover 基准改为 SurfaceTexture 实际渲染尺寸 —— 彻底解决"没铺满 + 底边花屏"
 
 ### 用户反馈（真机截图 21:32，上一版修复后）
-右上「大门口」：画面比上一版**大了**（surface 兜底确实生效），但**仍没铺满**——
+右上该通道：画面比上一版**大了**（surface 兜底确实生效），但**仍没铺满**——
 视频底部一条花屏带，再往下是蓝底。要求：**所有画面铺满窗口 + 底边花屏彻底解决**。
 
 ### 真正根因（上一版 cover fallback 的隐藏 bug）
@@ -335,7 +335,7 @@ adb logcat -s ChannelTileView PlayerActivity | grep "video-fit"
 
 ## 第十五轮（同日）：花屏深度研究 —— padding 判定维度修正
 
-### 用户反馈（真机截图 22:39，单画面 东门）
+### 用户反馈（真机截图 22:39，单画面）
 画面已**铺满**（cover 生效），但**屏幕最底边仍有一条花屏边**。要求深度研究。
 
 ### 深度研究结论：之前判定 padding 用错了维度

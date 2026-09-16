@@ -65,6 +65,6 @@ QA 独立 `--rerun-tasks` 全量重编 → BUILD SUCCESSFUL；逻辑 A/B/C 全 P
 - 无 Android 模拟器/真机 adb 设备环境，未实机冒烟 —— 真机验证不可绕
 
 ## 构建环境备忘（可复用）
-- SDK `C:\Android\Sdk`（仅 android-34）；Gradle `C:\Android\gradle\8.14`；JDK17 本地路径 `C:\Users\XXK\.workbuddy\jdks\jdk-17.0.20.1+1`
+- SDK `android-34`；Gradle 8.14；JDK 17（本机路径省略，构建脚本内配置）
 - AGP 8.1.x 必须 **JDK 17** 构建（18/25 会 jlink/class-version 失败）
 - 完整流程已沉淀为 skill `android-apk-headless-build`
